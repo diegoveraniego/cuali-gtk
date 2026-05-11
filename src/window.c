@@ -633,21 +633,28 @@ void window_init(GtkApplication *app) {
     adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), state->root_stack);
 
     /* --- Welcome Screen --- */
-    GtkWidget *welcome_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 20);
-    gtk_widget_set_halign (welcome_box, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign (welcome_box, GTK_ALIGN_CENTER);
-    adw_view_stack_add_named (ADW_VIEW_STACK (state->root_stack), welcome_box, "welcome");
+    GtkWidget *welcome_view = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    adw_view_stack_add_named (ADW_VIEW_STACK (state->root_stack), welcome_view, "welcome");
+    
+    GtkWidget *welcome_header = adw_header_bar_new ();
+    gtk_box_append (GTK_BOX (welcome_view), welcome_header);
+
+    GtkWidget *welcome_content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 20);
+    gtk_widget_set_halign (welcome_content, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign (welcome_content, GTK_ALIGN_CENTER);
+    gtk_widget_set_vexpand (welcome_content, TRUE);
+    gtk_box_append (GTK_BOX (welcome_view), welcome_content);
 
     GtkWidget *logo = gtk_image_new_from_icon_name ("org.gnome.TextEditor-symbolic");
     gtk_image_set_pixel_size (GTK_IMAGE (logo), 128);
-    gtk_box_append (GTK_BOX (welcome_box), logo);
+    gtk_box_append (GTK_BOX (welcome_content), logo);
 
     GtkWidget *title = gtk_label_new ("Bienvenido a Cuali");
     gtk_widget_add_css_class (title, "title-1");
-    gtk_box_append (GTK_BOX (welcome_box), title);
+    gtk_box_append (GTK_BOX (welcome_content), title);
 
     GtkWidget *btns_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
-    gtk_box_append (GTK_BOX (welcome_box), btns_box);
+    gtk_box_append (GTK_BOX (welcome_content), btns_box);
 
     GtkWidget *open_btn = gtk_button_new_with_label ("Abrir Proyecto Existente");
     gtk_widget_add_css_class (open_btn, "suggested-action");
@@ -662,7 +669,7 @@ void window_init(GtkApplication *app) {
 
     GtkWidget *recent_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_margin_top (recent_box, 30);
-    gtk_box_append (GTK_BOX (welcome_box), recent_box);
+    gtk_box_append (GTK_BOX (welcome_content), recent_box);
     
     GtkWidget *recent_label = gtk_label_new ("Proyectos Recientes");
     gtk_widget_add_css_class (recent_label, "sidebar-title");
@@ -681,11 +688,12 @@ void window_init(GtkApplication *app) {
     state->toast_overlay = toast_overlay;
     adw_view_stack_add_named (ADW_VIEW_STACK (state->root_stack), toast_overlay, "main");
 
-    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toast_overlay), main_box);
+    GtkWidget *main_view = adw_toolbar_view_new ();
+    adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toast_overlay), main_view);
 
     GtkWidget *header_bar = adw_header_bar_new();
-    gtk_box_append(GTK_BOX(main_box), header_bar);
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (main_view), header_bar);
+    
     // Add a back button to welcome screen in header bar
     GtkWidget *back_btn = gtk_button_new_from_icon_name ("go-previous-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), back_btn);
@@ -702,6 +710,7 @@ void window_init(GtkApplication *app) {
 
     state->view_stack = adw_view_stack_new ();
     g_signal_connect (state->view_stack, "notify::visible-child", G_CALLBACK (on_view_stack_visible_child_changed), state);
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (main_view), state->view_stack);
     
     GtkWidget *view_switcher = adw_view_switcher_new ();
     adw_view_switcher_set_stack (ADW_VIEW_SWITCHER (view_switcher), ADW_VIEW_STACK (state->view_stack));
@@ -834,9 +843,6 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_margin_end (state->results_list, 20);
     gtk_widget_set_margin_top (state->results_list, 20);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_content_scroll), state->results_list);
-
-    gtk_box_append (GTK_BOX (main_box), state->view_stack);
-    gtk_widget_set_vexpand (state->view_stack, TRUE);
 
     gtk_window_present(GTK_WINDOW(window));
 }
