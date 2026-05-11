@@ -190,6 +190,20 @@ bool db_highlight_link_tag(int highlight_id, int tag_id) {
     return success;
 }
 
+bool db_highlight_unlink_tag(int highlight_id, int tag_id) {
+    sqlite3_stmt *stmt;
+    const char *sql = "DELETE FROM highlight_tags WHERE highlight_id = ? AND tag_id = ?;";
+    
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
+    
+    sqlite3_bind_int(stmt, 1, highlight_id);
+    sqlite3_bind_int(stmt, 2, tag_id);
+    
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return success;
+}
+
 sqlite3_stmt* db_documents_get_all(int project_id) {
     sqlite3_stmt *stmt;
     const char *sql = "SELECT id, name, contents FROM documents WHERE project_id = ? ORDER BY name ASC;";
@@ -280,7 +294,7 @@ sqlite3_stmt* db_highlights_get_for_document(int document_id) {
 sqlite3_stmt* db_tags_get_for_highlight(int highlight_id) {
     sqlite3_stmt *stmt;
     const char *sql = 
-        "SELECT t.path FROM tags t "
+        "SELECT t.id, t.path FROM tags t "
         "JOIN highlight_tags ht ON t.id = ht.tag_id "
         "WHERE ht.highlight_id = ?;";
     
