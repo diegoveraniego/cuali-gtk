@@ -257,10 +257,68 @@ refresh_tags (CualiAppState *state)
 }
 
 static void
+show_tags_for_highlight (CualiAppState *state, int highlight_id)
+{
+    sqlite3_stmt *stmt = db_tags_get_for_highlight (highlight_id);
+    if (stmt) {
+        GString *tags = g_string_new ("Etiquetas: ");
+        bool first = true;
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            if (!first) g_string_append (tags, ", ");
+            g_string_append (tags, (const char *)sqlite3_column_text (stmt, 0));
+            first = false;
+        }
+        sqlite3_finalize (stmt);
+        
+        if (!first) {
+            AdwToast *toast = adw_toast_new (tags->str);
+            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay), toast);
+        }
+        g_string_free (tags, TRUE);
+    }
+}
+
+static void
+on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, int y, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    GtkTextView *view = GTK_TEXT_VIEW (state->text_view);
+    GtkTextIter iter;
+    
+    int buffer_x, buffer_y;
+    gtk_text_view_window_to_buffer_coords (view, GTK_TEXT_WINDOW_WIDGET, x, y, &buffer_x, &buffer_y);
+    gtk_text_view_get_iter_at_location (view, &iter, buffer_x, buffer_y);
+    
+    GSList *tags = gtk_text_iter_get_tags (&iter);
+    for (GSList *l = tags; l; l = l->next) {
+        GtkTextTag *tag = GTK_TEXT_TAG (l->data);
+        int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (tag), "highlight-id"));
+        if (hl_id > 0) {
+            show_tags_for_highlight (state, hl_id);
+            break;
+        }
+    }
+    g_slist_free (tags);
+}
+
+static void
+apply_highlight_tag (GtkTextBuffer *buffer, int hl_id, GtkTextIter *start, GtkTextIter *end)
+{
+    GtkTextTag *tag = gtk_text_buffer_create_tag (buffer, NULL, 
+                                                 "background", "#f9f06b", 
+                                                 "foreground", "#1a1a1a", 
+                                                 NULL);
+    g_object_set_data (G_OBJECT (tag), "highlight-id", GINT_TO_POINTER (hl_id));
+    gtk_text_buffer_apply_tag (buffer, tag, start, end);
+}
+
+static void
 load_document (CualiAppState *state, int document_id, const char *name, const char *contents)
 {
   state->current_document_id = document_id;
   GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view));
+  
+  gtk_text_buffer_set_text (buffer, "", 0);
   
   if (state->offset_map) g_free (state->offset_map);
   char *clean_text = map_html (contents, &state->offset_map, &state->plain_text_len);
@@ -273,6 +331,7 @@ load_document (CualiAppState *state, int document_id, const char *name, const ch
     while (sqlite3_step (stmt) == SQLITE_ROW) {
       int start_off = sqlite3_column_int (stmt, 0);
       int end_off = sqlite3_column_int (stmt, 1);
+      int hl_id = sqlite3_column_int (stmt, 2);
       
       int plain_start = html_to_plain (start_off, state->offset_map, state->plain_text_len);
       int plain_end = html_to_plain (end_off, state->offset_map, state->plain_text_len);
@@ -280,7 +339,7 @@ load_document (CualiAppState *state, int document_id, const char *name, const ch
       GtkTextIter start_iter, end_iter;
       gtk_text_buffer_get_iter_at_offset (buffer, &start_iter, plain_start);
       gtk_text_buffer_get_iter_at_offset (buffer, &end_iter, plain_end);
-      gtk_text_buffer_apply_tag_by_name (buffer, "highlight", &start_iter, &end_iter);
+      apply_highlight_tag (buffer, hl_id, &start_iter, &end_iter);
     }
     sqlite3_finalize (stmt);
   }
@@ -593,7 +652,7 @@ on_highlight_button_clicked (GtkButton *button, gpointer user_data)
     int hl_id = db_highlight_add (state->current_document_id, html_start, html_end, snippet);
     if (hl_id > 0) {
       db_highlight_link_tag (hl_id, tag_id);
-      gtk_text_buffer_apply_tag_by_name (buffer, "highlight", &start, &end);
+      apply_highlight_tag (buffer, hl_id, &start, &end);
       refresh_tags (state);
       refresh_results (state);
     }
@@ -626,6 +685,8 @@ void window_init(GtkApplication *app) {
     gtk_window_set_default_size(GTK_WINDOW(window), 1100, 800);
 
     state->root_stack = adw_view_stack_new ();
+    gtk_widget_set_vexpand (state->root_stack, TRUE);
+    gtk_widget_set_hexpand (state->root_stack, TRUE);
     adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), state->root_stack);
 
     /* --- Welcome Screen --- */
@@ -795,11 +856,10 @@ void window_init(GtkApplication *app) {
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (content_scroll), paper_box);
     GtkWidget *text_view = gtk_text_view_new();
     state->text_view = text_view;
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (text_view));
-    gtk_text_buffer_create_tag (buffer, "highlight", 
-                               "background", "#f9f06b", 
-                               "foreground", "#1a1a1a", 
-                               NULL);
+    
+    GtkGesture *click_gesture = gtk_gesture_click_new ();
+    g_signal_connect (click_gesture, "pressed", G_CALLBACK (on_text_view_clicked), state);
+    gtk_widget_add_controller (text_view, GTK_EVENT_CONTROLLER (click_gesture));
     
     gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD_CHAR);
@@ -842,5 +902,6 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_margin_top (state->results_list, 20);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_content_scroll), state->results_list);
 
+    // TODO: Fix window tiling/movement issue when opening projects
     gtk_window_present(GTK_WINDOW(window));
 }

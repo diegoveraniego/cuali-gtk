@@ -269,7 +269,7 @@ bool db_tag_delete(int tag_id) {
 
 sqlite3_stmt* db_highlights_get_for_document(int document_id) {
     sqlite3_stmt *stmt;
-    const char *sql = "SELECT start_offset, end_offset FROM highlights WHERE document_id = ?;";
+    const char *sql = "SELECT start_offset, end_offset, id FROM highlights WHERE document_id = ?;";
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
     

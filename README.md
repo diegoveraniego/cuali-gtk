@@ -43,5 +43,12 @@ Para iniciar la aplicación:
 
 Este proyecto se distribuye bajo la licencia **BSD 3-Clause**, manteniendo la misma filosofía de código abierto y permisos que Taguette. Consulta el archivo `LICENSE` para más información.
 
+## TODO (Pendientes)
+
+- [ ] Corregir error de posicionamiento/tiling de la ventana al abrir proyectos.
+- [ ] Implementar sistema de filtrado en la vista de resultados.
+- [ ] Mejorar el rendimiento al cargar documentos extremadamente largos.
+- [ ] Añadir soporte para exportación en otros formatos (Excel, CSV).
+
 ---
 Proyecto desarrollado por Diego (2026).
