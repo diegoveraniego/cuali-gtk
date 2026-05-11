@@ -8,13 +8,13 @@
 const char *style_css = 
   "textview { font-family: 'Cantarell', sans-serif; font-size: 12pt; background-color: transparent; }"
   ".sidebar-list { background-color: transparent; }"
-  ".sidebar-title { font-weight: bold; opacity: 0.5; font-size: 0.8rem; margin: 18px 0 6px 12px; }"
-  ".document-view { background-color: @window_bg_color; border-radius: 12px; margin: 0; }"
-  ".paper-sheet { background-color: @view_bg_color; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 40px auto; min-width: 650px; max-width: 800px; transition: all 0.3s; }"
+  ".sidebar-title { font-weight: bold; opacity: 0.5; font-size: 0.8rem; margin-top: 18px; margin-bottom: 6px; margin-left: 12px; }"
+  ".document-view { background-color: @window_bg_color; border-radius: 12px; }"
+  ".paper-sheet { background-color: @view_bg_color; border-radius: 4px; margin: 40px; min-width: 650px; transition: all 0.3s; }"
   ".tag-badge { background-color: @accent_bg_color; color: white; border-radius: 6px; padding: 2px 10px; font-size: 0.85rem; font-weight: 600; }"
   ".tag-count-badge { background-color: rgba(0,0,0,0.1); border-radius: 12px; padding: 1px 8px; font-size: 0.8rem; margin-right: 8px; }"
   ".result-card { background-color: @view_bg_color; border-radius: 12px; padding: 20px; border: 1px solid rgba(0,0,0,0.05); margin-bottom: 12px; }"
-  ".result-snippet { font-style: italic; font-family: serif; font-size: 1.1rem; line-height: 1.6; margin-bottom: 12px; display: block; }"
+  ".result-snippet { font-style: italic; font-family: serif; font-size: 1.1rem; line-height: 1.6; margin-bottom: 12px; }"
   ".result-meta { font-size: 0.85rem; opacity: 0.6; margin-top: 8px; }";
 
 static char*
@@ -64,6 +64,63 @@ html_to_plain (int html_offset, int *map, int len)
 
 static void refresh_documents (CualiAppState *state);
 static void load_document (CualiAppState *state, int document_id, const char *name, const char *contents);
+
+static void
+show_tags_for_highlight (CualiAppState *state, int highlight_id)
+{
+    sqlite3_stmt *stmt = db_tags_get_for_highlight (highlight_id);
+    if (stmt) {
+        GString *tags = g_string_new ("Etiquetas: ");
+        bool first = true;
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            if (!first) g_string_append (tags, ", ");
+            g_string_append (tags, (const char *)sqlite3_column_text (stmt, 0));
+            first = false;
+        }
+        sqlite3_finalize (stmt);
+        
+        if (!first) {
+            AdwToast *toast = adw_toast_new (tags->str);
+            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay), toast);
+        }
+        g_string_free (tags, TRUE);
+    }
+}
+
+static void
+on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, int y, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    GtkTextView *view = GTK_TEXT_VIEW (state->text_view);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (view);
+    GtkTextIter iter;
+    
+    int buffer_x, buffer_y;
+    gtk_text_view_window_to_buffer_coords (view, GTK_TEXT_WINDOW_WIDGET, x, y, &buffer_x, &buffer_y);
+    gtk_text_view_get_iter_at_location (view, &iter, buffer_x, buffer_y);
+    
+    GSList *tags = gtk_text_iter_get_tags (&iter);
+    for (GSList *l = tags; l; l = l->next) {
+        GtkTextTag *tag = GTK_TEXT_TAG (l->data);
+        int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (tag), "highlight-id"));
+        if (hl_id > 0) {
+            show_tags_for_highlight (state, hl_id);
+            break;
+        }
+    }
+    g_slist_free (tags);
+}
+
+static void
+apply_highlight_tag (GtkTextBuffer *buffer, int hl_id, GtkTextIter *start, GtkTextIter *end)
+{
+    GtkTextTag *tag = gtk_text_buffer_create_tag (buffer, NULL, 
+                                                 "background", "#f9f06b", 
+                                                 "foreground", "#1a1a1a", 
+                                                 NULL);
+    g_object_set_data (G_OBJECT (tag), "highlight-id", GINT_TO_POINTER (hl_id));
+    gtk_text_buffer_apply_tag (buffer, tag, start, end);
+}
 
 static void
 on_edit_toggle_clicked (GtkButton *button, gpointer user_data)
@@ -254,62 +311,6 @@ refresh_tags (CualiAppState *state)
     }
     sqlite3_finalize (stmt);
   }
-}
-
-static void
-show_tags_for_highlight (CualiAppState *state, int highlight_id)
-{
-    sqlite3_stmt *stmt = db_tags_get_for_highlight (highlight_id);
-    if (stmt) {
-        GString *tags = g_string_new ("Etiquetas: ");
-        bool first = true;
-        while (sqlite3_step (stmt) == SQLITE_ROW) {
-            if (!first) g_string_append (tags, ", ");
-            g_string_append (tags, (const char *)sqlite3_column_text (stmt, 0));
-            first = false;
-        }
-        sqlite3_finalize (stmt);
-        
-        if (!first) {
-            AdwToast *toast = adw_toast_new (tags->str);
-            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay), toast);
-        }
-        g_string_free (tags, TRUE);
-    }
-}
-
-static void
-on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, int y, gpointer user_data)
-{
-    CualiAppState *state = (CualiAppState *)user_data;
-    GtkTextView *view = GTK_TEXT_VIEW (state->text_view);
-    GtkTextIter iter;
-    
-    int buffer_x, buffer_y;
-    gtk_text_view_window_to_buffer_coords (view, GTK_TEXT_WINDOW_WIDGET, x, y, &buffer_x, &buffer_y);
-    gtk_text_view_get_iter_at_location (view, &iter, buffer_x, buffer_y);
-    
-    GSList *tags = gtk_text_iter_get_tags (&iter);
-    for (GSList *l = tags; l; l = l->next) {
-        GtkTextTag *tag = GTK_TEXT_TAG (l->data);
-        int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (tag), "highlight-id"));
-        if (hl_id > 0) {
-            show_tags_for_highlight (state, hl_id);
-            break;
-        }
-    }
-    g_slist_free (tags);
-}
-
-static void
-apply_highlight_tag (GtkTextBuffer *buffer, int hl_id, GtkTextIter *start, GtkTextIter *end)
-{
-    GtkTextTag *tag = gtk_text_buffer_create_tag (buffer, NULL, 
-                                                 "background", "#f9f06b", 
-                                                 "foreground", "#1a1a1a", 
-                                                 NULL);
-    g_object_set_data (G_OBJECT (tag), "highlight-id", GINT_TO_POINTER (hl_id));
-    gtk_text_buffer_apply_tag (buffer, tag, start, end);
 }
 
 static void
@@ -731,11 +732,14 @@ void window_init(GtkApplication *app) {
     gtk_widget_add_css_class (recent_label, "sidebar-title");
     gtk_box_append (GTK_BOX (recent_box), recent_label);
     
+    GtkWidget *recent_scroll = gtk_scrolled_window_new ();
+    gtk_widget_set_size_request (recent_scroll, 400, 200);
+    gtk_box_append (GTK_BOX (recent_box), recent_scroll);
+
     state->recent_list = gtk_list_box_new ();
     gtk_widget_add_css_class (state->recent_list, "sidebar-list");
-    gtk_widget_set_size_request (state->recent_list, 300, -1);
     g_signal_connect (state->recent_list, "row-selected", G_CALLBACK (on_recent_row_selected), state);
-    gtk_box_append (GTK_BOX (recent_box), state->recent_list);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (recent_scroll), state->recent_list);
 
     populate_recent_list (state);
 
@@ -825,9 +829,13 @@ void window_init(GtkApplication *app) {
     gtk_widget_add_css_class (docs_title, "sidebar-title");
     gtk_widget_set_halign (docs_title, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(sidebar_box), docs_title);
+
+    GtkWidget *scrolled_docs = gtk_scrolled_window_new ();
+    gtk_widget_set_vexpand (scrolled_docs, TRUE);
+    gtk_box_append (GTK_BOX (sidebar_box), scrolled_docs);
     state->doc_list = gtk_list_box_new ();
     gtk_widget_add_css_class (state->doc_list, "sidebar-list");
-    gtk_box_append (GTK_BOX (sidebar_box), state->doc_list);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_docs), state->doc_list);
     g_signal_connect (state->doc_list, "row-selected", G_CALLBACK (on_doc_row_selected), state);
 
     GtkWidget *tags_title = gtk_label_new("ETIQUETAS");
@@ -887,9 +895,12 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_halign (stats_title, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(res_sidebar), stats_title);
 
+    GtkWidget *res_tag_scroll = gtk_scrolled_window_new ();
+    gtk_widget_set_vexpand (res_tag_scroll, TRUE);
+    gtk_box_append (GTK_BOX (res_sidebar), res_tag_scroll);
     state->results_tag_list = gtk_list_box_new ();
     gtk_widget_add_css_class (state->results_tag_list, "sidebar-list");
-    gtk_box_append (GTK_BOX (res_sidebar), state->results_tag_list);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_tag_scroll), state->results_tag_list);
 
     GtkWidget *res_content_scroll = gtk_scrolled_window_new ();
     adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(res_split_view), res_content_scroll);
@@ -902,6 +913,5 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_margin_top (state->results_list, 20);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_content_scroll), state->results_list);
 
-    // TODO: Fix window tiling/movement issue when opening projects
     gtk_window_present(GTK_WINDOW(window));
 }
