@@ -77,10 +77,8 @@ on_edit_toggle_clicked (GtkButton *button, gpointer user_data)
   if (state->is_editing) {
     gtk_text_view_set_editable (GTK_TEXT_VIEW (state->text_view), TRUE);
     gtk_button_set_icon_name (GTK_BUTTON (state->edit_toggle), "emblem-ok-symbolic");
-    // Remove highlights while editing to avoid confusion
     gtk_text_buffer_remove_tag_by_name (buffer, "highlight", NULL, NULL);
   } else {
-    // Save changes
     GtkTextIter start, end;
     gtk_text_buffer_get_bounds (buffer, &start, &end);
     char *text = gtk_text_buffer_get_text (buffer, &start, &end, FALSE);
@@ -97,7 +95,6 @@ on_edit_toggle_clicked (GtkButton *button, gpointer user_data)
     gtk_text_view_set_editable (GTK_TEXT_VIEW (state->text_view), FALSE);
     gtk_button_set_icon_name (GTK_BUTTON (state->edit_toggle), "document-edit-symbolic");
     
-    // Reload document to refresh highlights and offset map
     load_document (state, state->current_document_id, "dummy", html->str);
     
     g_string_free (html, TRUE);
@@ -196,7 +193,6 @@ refresh_results (CualiAppState *state)
       GtkWidget *meta_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
       gtk_box_append (GTK_BOX (card), meta_box);
       
-      // Split tags and create badges
       if (tags_str) {
         char **tags = g_strsplit (tags_str, ", ", -1);
         for (int i = 0; tags[i]; i++) {
@@ -633,17 +629,16 @@ void window_init(GtkApplication *app) {
     adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), state->root_stack);
 
     /* --- Welcome Screen --- */
-    GtkWidget *welcome_view = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *welcome_view = adw_toolbar_view_new ();
     adw_view_stack_add_named (ADW_VIEW_STACK (state->root_stack), welcome_view, "welcome");
     
     GtkWidget *welcome_header = adw_header_bar_new ();
-    gtk_box_append (GTK_BOX (welcome_view), welcome_header);
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (welcome_view), welcome_header);
 
     GtkWidget *welcome_content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 20);
     gtk_widget_set_halign (welcome_content, GTK_ALIGN_CENTER);
     gtk_widget_set_valign (welcome_content, GTK_ALIGN_CENTER);
-    gtk_widget_set_vexpand (welcome_content, TRUE);
-    gtk_box_append (GTK_BOX (welcome_view), welcome_content);
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (welcome_view), welcome_content);
 
     GtkWidget *logo = gtk_image_new_from_icon_name ("org.gnome.TextEditor-symbolic");
     gtk_image_set_pixel_size (GTK_IMAGE (logo), 128);
@@ -684,17 +679,19 @@ void window_init(GtkApplication *app) {
     populate_recent_list (state);
 
     /* --- Main App Content --- */
+    GtkWidget *main_toolbar_view = adw_toolbar_view_new ();
+    adw_view_stack_add_named (ADW_VIEW_STACK (state->root_stack), main_toolbar_view, "main");
+
     GtkWidget *toast_overlay = adw_toast_overlay_new ();
     state->toast_overlay = toast_overlay;
-    adw_view_stack_add_named (ADW_VIEW_STACK (state->root_stack), toast_overlay, "main");
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (main_toolbar_view), toast_overlay);
 
-    GtkWidget *main_view = adw_toolbar_view_new ();
-    adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toast_overlay), main_view);
+    GtkWidget *main_view_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toast_overlay), main_view_box);
 
     GtkWidget *header_bar = adw_header_bar_new();
-    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (main_view), header_bar);
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (main_toolbar_view), header_bar);
     
-    // Add a back button to welcome screen in header bar
     GtkWidget *back_btn = gtk_button_new_from_icon_name ("go-previous-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), back_btn);
     g_signal_connect_data(back_btn, "clicked", G_CALLBACK(adw_view_stack_set_visible_child_name), g_strdup("welcome"), (GClosureNotify)g_free, G_CONNECT_SWAPPED);
@@ -710,7 +707,8 @@ void window_init(GtkApplication *app) {
 
     state->view_stack = adw_view_stack_new ();
     g_signal_connect (state->view_stack, "notify::visible-child", G_CALLBACK (on_view_stack_visible_child_changed), state);
-    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (main_view), state->view_stack);
+    gtk_box_append (GTK_BOX (main_view_box), state->view_stack);
+    gtk_widget_set_vexpand (state->view_stack, TRUE);
     
     GtkWidget *view_switcher = adw_view_switcher_new ();
     adw_view_switcher_set_stack (ADW_VIEW_SWITCHER (view_switcher), ADW_VIEW_STACK (state->view_stack));
