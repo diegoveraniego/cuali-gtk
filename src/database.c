@@ -60,6 +60,28 @@ bool db_init(const char *path) {
         return false;
     }
 
+    /* Migración: añadir color a tags si no existe */
+    sqlite3_stmt *check_col;
+    bool has_color = false;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info('tags') WHERE name='color';", -1, &check_col, NULL) == SQLITE_OK) {
+        has_color = (sqlite3_step(check_col) == SQLITE_ROW);
+        sqlite3_finalize(check_col);
+    }
+    if (!has_color) {
+        sqlite3_exec(db, "ALTER TABLE tags ADD COLUMN color TEXT;", NULL, NULL, NULL);
+    }
+
+    /* Migration: add memo to highlights if missing */
+    sqlite3_stmt *check_memo;
+    bool has_memo = false;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info('highlights') WHERE name='memo';", -1, &check_memo, NULL) == SQLITE_OK) {
+        has_memo = (sqlite3_step(check_memo) == SQLITE_ROW);
+        sqlite3_finalize(check_memo);
+    }
+    if (!has_memo) {
+        sqlite3_exec(db, "ALTER TABLE highlights ADD COLUMN memo TEXT;", NULL, NULL, NULL);
+    }
+
     return true;
 }
 
@@ -130,16 +152,46 @@ bool db_document_update_contents(int document_id, const char *contents) {
     return success;
 }
 
-bool db_tag_add(int project_id, const char *path, const char *description) {
+bool db_tag_add(int project_id, const char *path, const char *description, const char *color) {
     sqlite3_stmt *stmt;
-    const char *sql = "INSERT INTO tags (project_id, path, description) VALUES (?, ?, ?);";
+    const char *sql = "INSERT INTO tags (project_id, path, description, color) VALUES (?, ?, ?, ?);";
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
     
     sqlite3_bind_int(stmt, 1, project_id);
     sqlite3_bind_text(stmt, 2, path, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, description, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, color, -1, SQLITE_STATIC);
     
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return success;
+}
+
+bool db_tag_get_info(int tag_id, char **path, char **description, char **color) {
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT path, description, color FROM tags WHERE id = ?;";
+    bool found = false;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, tag_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            if (path)        *path        = g_strdup((const char *)sqlite3_column_text(stmt, 0));
+            if (description) *description = g_strdup((const char *)sqlite3_column_text(stmt, 1));
+            if (color)       *color       = g_strdup((const char *)sqlite3_column_text(stmt, 2));
+            found = true;
+        }
+        sqlite3_finalize(stmt);
+    }
+    return found;
+}
+
+bool db_tag_update(int tag_id, const char *path, const char *description) {
+    sqlite3_stmt *stmt;
+    const char *sql = "UPDATE tags SET path = ?, description = ? WHERE id = ?;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, description, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 3, tag_id);
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return success;
@@ -147,7 +199,7 @@ bool db_tag_add(int project_id, const char *path, const char *description) {
 
 sqlite3_stmt* db_tags_get_all(int project_id) {
     sqlite3_stmt *stmt;
-    const char *sql = "SELECT id, path FROM tags WHERE project_id = ? ORDER BY path ASC;";
+    const char *sql = "SELECT id, path, color FROM tags WHERE project_id = ? ORDER BY path ASC;";
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
     
@@ -176,6 +228,33 @@ int db_highlight_add(int document_id, int start, int end, const char *snippet) {
     return -1;
 }
 
+bool db_highlight_set_memo(int highlight_id, const char *memo) {
+    sqlite3_stmt *stmt;
+    const char *sql = "UPDATE highlights SET memo = ? WHERE id = ?;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, memo, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, highlight_id);
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+bool db_highlight_get_memo(int highlight_id, char **memo) {
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT memo FROM highlights WHERE id = ?;";
+    bool found = false;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, highlight_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *m = (const char *)sqlite3_column_text(stmt, 0);
+            if (memo) *memo = m ? g_strdup(m) : g_strdup("");
+            found = true;
+        }
+        sqlite3_finalize(stmt);
+    }
+    return found;
+}
+
 bool db_highlight_link_tag(int highlight_id, int tag_id) {
     sqlite3_stmt *stmt;
     const char *sql = "INSERT INTO highlight_tags (highlight_id, tag_id) VALUES (?, ?);";
@@ -202,6 +281,32 @@ bool db_highlight_unlink_tag(int highlight_id, int tag_id) {
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return success;
+}
+
+bool db_highlight_delete(int highlight_id) {
+    if (!db) return false;
+    sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
+
+    sqlite3_stmt *stmt;
+    const char *sql1 = "DELETE FROM highlight_tags WHERE highlight_id = ?;";
+    if (sqlite3_prepare_v2(db, sql1, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, highlight_id);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+
+    const char *sql2 = "DELETE FROM highlights WHERE id = ?;";
+    if (sqlite3_prepare_v2(db, sql2, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, highlight_id);
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+
+    sqlite3_exec(db, ok ? "COMMIT;" : "ROLLBACK;", NULL, NULL, NULL);
+    return ok;
 }
 
 sqlite3_stmt* db_documents_get_all(int project_id) {
@@ -294,9 +399,11 @@ sqlite3_stmt* db_highlights_get_for_document(int document_id) {
 sqlite3_stmt* db_tags_get_for_highlight(int highlight_id) {
     sqlite3_stmt *stmt;
     const char *sql = 
-        "SELECT t.id, t.path FROM tags t "
+        "SELECT t.id, t.path, t.color "
+        "FROM tags t "
         "JOIN highlight_tags ht ON t.id = ht.tag_id "
-        "WHERE ht.highlight_id = ?;";
+        "WHERE ht.highlight_id = ? "
+        "ORDER BY t.path ASC;";
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
     
@@ -324,11 +431,12 @@ sqlite3_stmt* db_results_get_all(int project_id) {
 sqlite3_stmt* db_tags_get_stats(int project_id) {
     sqlite3_stmt *stmt;
     const char *sql = 
-        "SELECT t.path, COUNT(ht.highlight_id) as count FROM tags t "
+        "SELECT t.id, t.path, t.color, COUNT(ht.highlight_id) as highlight_count "
+        "FROM tags t "
         "LEFT JOIN highlight_tags ht ON t.id = ht.tag_id "
         "WHERE t.project_id = ? "
         "GROUP BY t.id "
-        "ORDER BY count DESC, t.path ASC;";
+        "ORDER BY highlight_count DESC, t.path ASC;";
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
     

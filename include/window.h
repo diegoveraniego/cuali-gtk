@@ -9,6 +9,7 @@ typedef struct {
     GtkWidget *doc_list;
     GtkWidget *toast_overlay;
     GtkWidget *view_stack;
+    GtkWidget *tag_list;
     GtkWidget *results_list;
     GtkWidget *results_tag_list;
     GtkWidget *project_name_entry;
@@ -22,6 +23,14 @@ typedef struct {
     int *offset_map;
     int plain_text_len;
     char *selected_result_tag;
+    /* [NUEVO] */
+    GtkWidget *highlight_popover;
+    GtkWidget *popover_tag_list;
+    GtkWidget *popover_delete_btn;
+    GtkWidget *popover_memo_view;   /* GtkTextView for researcher memos */
+    int active_highlight_id;
+    int pending_start;
+    int pending_end;
 } CualiAppState;
 
 void window_init(GtkApplication *app);

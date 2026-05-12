@@ -17,7 +17,9 @@ bool db_document_update_contents(int document_id, const char *contents);
 bool db_document_delete(int document_id);
 sqlite3_stmt* db_documents_get_all(int project_id);
 
-bool db_tag_add(int project_id, const char *path, const char *description);
+bool db_tag_add(int project_id, const char *path, const char *description, const char *color);
+bool db_tag_update(int tag_id, const char *path, const char *description);
+bool db_tag_get_info(int tag_id, char **path, char **description, char **color);
 bool db_tag_delete(int tag_id);
 sqlite3_stmt* db_tags_get_all(int project_id);
 sqlite3_stmt* db_tags_get_for_highlight(int highlight_id);
@@ -25,8 +27,11 @@ sqlite3_stmt* db_tags_get_stats(int project_id);
 int db_tag_get_count(int tag_id);
 
 int db_highlight_add(int document_id, int start, int end, const char *snippet);
+bool db_highlight_set_memo(int highlight_id, const char *memo);
+bool db_highlight_get_memo(int highlight_id, char **memo);
 bool db_highlight_link_tag(int highlight_id, int tag_id);
 bool db_highlight_unlink_tag(int highlight_id, int tag_id);
+bool db_highlight_delete(int highlight_id);
 sqlite3_stmt* db_highlights_get_for_document(int document_id);
 
 sqlite3_stmt* db_results_get_all(int project_id);
