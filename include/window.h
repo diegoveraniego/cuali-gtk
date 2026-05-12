@@ -6,7 +6,6 @@
 typedef struct {
     GtkWidget *text_view;
     GtkWidget *window;
-    GtkWidget *tag_list;
     GtkWidget *doc_list;
     GtkWidget *toast_overlay;
     GtkWidget *view_stack;
@@ -22,6 +21,7 @@ typedef struct {
     bool is_editing;
     int *offset_map;
     int plain_text_len;
+    char *selected_result_tag;
 } CualiAppState;
 
 void window_init(GtkApplication *app);
