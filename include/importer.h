@@ -3,6 +3,10 @@
 
 #include <glib.h>
 
-char* importer_pdf_to_text(const char *filename);
+/* PDF → Taguette-compatible HTML (paragraphs as <p> blocks) */
+char* importer_pdf_to_html (const char *filename);
+
+/* Plain text → Taguette-compatible HTML */
+char* importer_text_to_html (const char *text);
 
 #endif

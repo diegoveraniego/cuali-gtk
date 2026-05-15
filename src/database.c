@@ -3,6 +3,7 @@
 #include <glib.h>
 
 static sqlite3 *db = NULL;
+static char *current_db_path = NULL;
 
 bool db_init(const char *path) {
     if (db) {
@@ -11,6 +12,10 @@ bool db_init(const char *path) {
     }
 
     int rc = sqlite3_open(path, &db);
+    if (rc == SQLITE_OK) {
+        g_free(current_db_path);
+        current_db_path = g_strdup(path);
+    }
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
         return false;
@@ -192,6 +197,17 @@ bool db_tag_update(int tag_id, const char *path, const char *description) {
     sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, description, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 3, tag_id);
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return success;
+}
+
+bool db_tag_update_color(int tag_id, const char *color) {
+    sqlite3_stmt *stmt;
+    const char *sql = "UPDATE tags SET color = ? WHERE id = ?;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, color, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, tag_id);
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return success;
@@ -436,7 +452,7 @@ sqlite3_stmt* db_tags_get_stats(int project_id) {
         "LEFT JOIN highlight_tags ht ON t.id = ht.tag_id "
         "WHERE t.project_id = ? "
         "GROUP BY t.id "
-        "ORDER BY highlight_count DESC, t.path ASC;";
+        "ORDER BY t.path ASC;";
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
     
@@ -489,4 +505,8 @@ bool db_project_update_info(int project_id, const char *name, const char *descri
     bool success = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return success;
+}
+
+const char *db_get_path(void) {
+    return current_db_path;
 }

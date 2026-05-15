@@ -31,6 +31,31 @@ typedef struct {
     int active_highlight_id;
     int pending_start;
     int pending_end;
+    double zoom_level;
+    GtkCssProvider *font_provider;
+    bool has_unsaved_changes;
+    GtkWidget *save_btn;
+
+    /* Busqueda en documento (Ctrl+F) */
+    GtkWidget *search_bar;
+    GtkWidget *search_entry;
+    GtkTextTag *search_match_tag;
+    GtkTextTag *search_current_tag;
+    int search_match_count;
+    int search_current_match;
+
+    /* Auto-guardado */
+    guint auto_save_id;
+
+    /* Barra de estado */
+    GtkWidget *status_label;
+
+    /* Filtro de documentos */
+    GtkWidget *doc_filter_entry;
+
+    /* Tags jerarquicas */
+    GtkWidget *tag_tree_view;
+    GtkTreeStore *tag_store;
 } CualiAppState;
 
 void window_init(GtkApplication *app);

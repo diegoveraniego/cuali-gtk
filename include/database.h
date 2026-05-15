@@ -6,6 +6,7 @@
 
 bool db_init(const char *path);
 void db_close(void);
+const char *db_get_path(void);
 
 bool db_project_add(const char *name, const char *description);
 int db_project_get_first_id(void);
@@ -19,6 +20,7 @@ sqlite3_stmt* db_documents_get_all(int project_id);
 
 bool db_tag_add(int project_id, const char *path, const char *description, const char *color);
 bool db_tag_update(int tag_id, const char *path, const char *description);
+bool db_tag_update_color(int tag_id, const char *color);
 bool db_tag_get_info(int tag_id, char **path, char **description, char **color);
 bool db_tag_delete(int tag_id);
 sqlite3_stmt* db_tags_get_all(int project_id);

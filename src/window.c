@@ -87,16 +87,50 @@ html_to_plain (int html_offset, int *map, int len)
 static void refresh_documents (CualiAppState *state);
 static void refresh_results (CualiAppState *state);
 static void refresh_tags (CualiAppState *state);
+static void update_status_bar (CualiAppState *state);
+static void search_clear_matches (CualiAppState *state);
+static void search_find (CualiAppState *state, bool forward);
+
+typedef struct {
+    CualiAppState *state;
+    int offset;
+    double scroll_pos;
+} ScrollRestoreData;
+
+static gboolean
+restore_scroll_idle (gpointer user_data)
+{
+    ScrollRestoreData *data = (ScrollRestoreData *)user_data;
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (data->state->text_view));
+    
+    if (data->offset >= 0) {
+        GtkTextIter iter;
+        int len = gtk_text_buffer_get_char_count (buffer);
+        int off = data->offset > len ? len : data->offset;
+        gtk_text_buffer_get_iter_at_offset (buffer, &iter, off);
+        gtk_text_buffer_place_cursor (buffer, &iter);
+    }
+    
+    GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (gtk_widget_get_ancestor (data->state->text_view, GTK_TYPE_SCROLLED_WINDOW)));
+    if (adj) {
+        double max = gtk_adjustment_get_upper (adj) - gtk_adjustment_get_page_size (adj);
+        double pos = data->scroll_pos > max ? max : data->scroll_pos;
+        gtk_adjustment_set_value (adj, pos);
+    }
+    
+    g_free (data);
+    return FALSE;
+}
 
 static const char *TAG_COLORS[] = {
-    "#854d0e",  /* ámbar oscuro  */
-    "#1e40af",  /* azul          */
-    "#166534",  /* verde         */
-    "#6b21a8",  /* violeta       */
-    "#9f1239",  /* rojo oscuro   */
-    "#0f6e56",  /* teal          */
-    "#7c3aed",  /* púrpura       */
-    "#b45309",  /* naranja       */
+    "#3584e4",  /* Blue 3 */
+    "#33d17a",  /* Green 3 */
+    "#f6d32d",  /* Yellow 3 */
+    "#ff7800",  /* Orange 3 */
+    "#e01b24",  /* Red 3 */
+    "#9141ac",  /* Purple 3 */
+    "#986a44",  /* Brown 3 */
+    "#3d3846",  /* Dark 3 */
 };
 #define TAG_COLORS_COUNT 8
 
@@ -150,6 +184,66 @@ on_res_sidebar_toggle (GtkToggleButton *btn, gpointer user_data)
 {
     AdwOverlaySplitView *sv = ADW_OVERLAY_SPLIT_VIEW (user_data);
     adw_overlay_split_view_set_show_sidebar (sv, gtk_toggle_button_get_active (btn));
+}
+
+static void
+load_document (CualiAppState *state, int document_id, const char *name, const char *contents)
+{
+  state->current_document_id = document_id;
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view));
+  
+  GtkTextMark *mark = gtk_text_buffer_get_insert (buffer);
+  GtkTextIter old_cursor;
+  gtk_text_buffer_get_iter_at_mark (buffer, &old_cursor, mark);
+  int offset = gtk_text_iter_get_offset (&old_cursor);
+  
+  GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (gtk_widget_get_ancestor (state->text_view, GTK_TYPE_SCROLLED_WINDOW)));
+  double scroll_pos = adj ? gtk_adjustment_get_value (adj) : 0;
+
+  /* set_text is irreversible and clears history, cannot be inside user_action */
+  gtk_text_buffer_set_text (buffer, "", 0);
+  
+  gtk_text_buffer_begin_user_action (buffer);
+  
+  if (state->offset_map) g_free (state->offset_map);
+  char *clean_text = map_html (contents, &state->offset_map, &state->plain_text_len);
+  
+  gtk_text_buffer_set_text (buffer, clean_text ? clean_text : "", -1);
+  
+  sqlite3_stmt *stmt = db_highlights_get_for_document (document_id);
+  if (stmt) {
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+      int start_off = sqlite3_column_int (stmt, 0);
+      int end_off = sqlite3_column_int (stmt, 1);
+      int hl_id = sqlite3_column_int (stmt, 2);
+      
+      if (clean_text) {
+          int len = (int)strlen (clean_text);
+          int p_start = start_off < 0 ? 0 : (start_off > len ? len : start_off);
+          int p_end   = end_off   < p_start ? p_start : (end_off > len ? len : end_off);
+          
+          int char_start = (int)g_utf8_pointer_to_offset (clean_text, clean_text + p_start);
+          int char_end   = (int)g_utf8_pointer_to_offset (clean_text, clean_text + p_end);
+          
+          GtkTextIter start_iter, end_iter;
+          gtk_text_buffer_get_iter_at_offset (buffer, &start_iter, char_start);
+          gtk_text_buffer_get_iter_at_offset (buffer, &end_iter, char_end);
+          apply_highlight_tag (buffer, hl_id, &start_iter, &end_iter);
+      }
+    }
+    sqlite3_finalize (stmt);
+  }
+  gtk_text_buffer_end_user_action (buffer);
+
+  ScrollRestoreData *data = g_new0 (ScrollRestoreData, 1);
+  data->state = state;
+  data->offset = offset;
+  data->scroll_pos = scroll_pos;
+  g_idle_add (restore_scroll_idle, data);
+
+  g_free (clean_text);
+
+  update_status_bar (state);
 }
 
 static void
@@ -282,13 +376,20 @@ on_tag_edit_save_clicked (GtkButton *btn, gpointer user_data)
     int tag_id = GPOINTER_TO_INT (args[1]);
     GtkWidget *name_entry = GTK_WIDGET (args[2]);
     GtkWidget *desc_entry = GTK_WIDGET (args[3]);
-    GtkWidget *dialog = GTK_WIDGET (args[4]);
+    GtkWidget *color_btn = GTK_WIDGET (args[4]);
+    GtkWidget *dialog = GTK_WIDGET (args[5]);
 
     const char *name = gtk_editable_get_text (GTK_EDITABLE (name_entry));
     const char *desc = gtk_editable_get_text (GTK_EDITABLE (desc_entry));
 
     if (name && *name) {
         db_tag_update (tag_id, name, desc ? desc : "");
+
+        const GdkRGBA *rgba = gtk_color_dialog_button_get_rgba (GTK_COLOR_DIALOG_BUTTON (color_btn));
+        char *hex = gdk_rgba_to_string (rgba);
+        db_tag_update_color (tag_id, hex);
+        g_free (hex);
+
         refresh_tags (state);
         refresh_results (state);
     }
@@ -303,7 +404,7 @@ show_tag_edit_dialog (CualiAppState *state, int tag_id)
 
     GtkWidget *dialog = GTK_WIDGET (adw_dialog_new ());
     adw_dialog_set_title (ADW_DIALOG (dialog), "Editar Etiqueta");
-    adw_dialog_set_content_width (ADW_DIALOG (dialog), 400);
+    adw_dialog_set_content_width (ADW_DIALOG (dialog), 420);
 
     GtkWidget *toolbar_view = adw_toolbar_view_new ();
     GtkWidget *header_bar = adw_header_bar_new ();
@@ -330,18 +431,36 @@ show_tag_edit_dialog (CualiAppState *state, int tag_id)
 
     gtk_box_append (GTK_BOX (content_box), group);
 
+    /* Color picker */
+    GtkWidget *color_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_top (color_box, 8);
+    gtk_widget_set_margin_start (color_box, 6);
+    GtkWidget *color_label = gtk_label_new ("Color:");
+    gtk_box_append (GTK_BOX (color_box), color_label);
+
+    GdkRGBA cur_rgba;
+    gdk_rgba_parse (&cur_rgba, cur_color && *cur_color ? cur_color : "#3584e4");
+    GtkColorDialog *color_dialog = gtk_color_dialog_new ();
+    gtk_color_dialog_set_with_alpha (color_dialog, FALSE);
+    GtkWidget *color_btn = gtk_color_dialog_button_new (color_dialog);
+    gtk_color_dialog_button_set_rgba (GTK_COLOR_DIALOG_BUTTON (color_btn), &cur_rgba);
+    gtk_box_append (GTK_BOX (color_box), color_btn);
+    gtk_widget_set_halign (color_box, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (content_box), color_box);
+
     GtkWidget *save_btn = gtk_button_new_with_label ("Guardar");
     gtk_widget_add_css_class (save_btn, "suggested-action");
     gtk_widget_add_css_class (save_btn, "pill");
     gtk_widget_set_halign (save_btn, GTK_ALIGN_END);
     gtk_box_append (GTK_BOX (content_box), save_btn);
 
-    gpointer *args = g_new (gpointer, 5);
+    gpointer *args = g_new (gpointer, 6);
     args[0] = state;
     args[1] = GINT_TO_POINTER (tag_id);
     args[2] = name_row;
     args[3] = desc_row;
-    args[4] = dialog;
+    args[4] = color_btn;
+    args[5] = dialog;
     g_signal_connect_data (save_btn, "clicked",
                            G_CALLBACK (on_tag_edit_save_clicked),
                            args, (GClosureNotify)g_free, 0);
@@ -518,13 +637,46 @@ static void populate_popover_tags(CualiAppState *state)
 static void on_popover_closed (GtkPopover *popover, gpointer user_data)
 {
     CualiAppState *state = (CualiAppState *)user_data;
-    if (state->active_highlight_id <= 0) return;
-    GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->popover_memo_view));
-    GtkTextIter s, e;
-    gtk_text_buffer_get_bounds(buf, &s, &e);
-    char *memo = gtk_text_buffer_get_text(buf, &s, &e, FALSE);
-    db_highlight_set_memo(state->active_highlight_id, memo ? memo : "");
-    g_free(memo);
+    
+    /* Save memo if active */
+    if (state->active_highlight_id > 0) {
+        GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->popover_memo_view));
+        GtkTextIter s, e;
+        gtk_text_buffer_get_bounds(buf, &s, &e);
+        char *memo = gtk_text_buffer_get_text(buf, &s, &e, FALSE);
+        db_highlight_set_memo(state->active_highlight_id, memo ? memo : "");
+        g_free(memo);
+    }
+    
+    /* Save cursor and scroll position before focus grab */
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+    GtkTextMark *mark = gtk_text_buffer_get_insert(buffer);
+    GtkTextIter cursor_iter;
+    gtk_text_buffer_get_iter_at_mark(buffer, &cursor_iter, mark);
+    int cursor_offset = gtk_text_iter_get_offset(&cursor_iter);
+    
+    GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (gtk_widget_get_ancestor (state->text_view, GTK_TYPE_SCROLLED_WINDOW)));
+    double scroll_pos = adj ? gtk_adjustment_get_value (adj) : 0;
+    
+    gtk_widget_grab_focus (state->text_view);
+    
+    /* Restore cursor position after focus grab */
+    if (cursor_offset >= 0) {
+        GtkTextIter restore_iter;
+        gtk_text_buffer_get_iter_at_offset(buffer, &restore_iter, cursor_offset);
+        gtk_text_buffer_place_cursor(buffer, &restore_iter);
+    }
+    
+    /* Restore scroll after focus grab might have triggered a jump */
+    if (adj) {
+        gtk_adjustment_set_value (adj, scroll_pos);
+        /* Double-check in next cycle */
+        ScrollRestoreData *data = g_new0 (ScrollRestoreData, 1);
+        data->state = state;
+        data->scroll_pos = scroll_pos;
+        data->offset = -1; /* Don't move cursor */
+        g_idle_add (restore_scroll_idle, data);
+    }
 }
 
 static void show_popover_at(CualiAppState *state, double x, double y, int highlight_id)
@@ -541,15 +693,23 @@ static void show_popover_at(CualiAppState *state, double x, double y, int highli
     g_free(memo);
     gtk_widget_set_visible(state->popover_memo_view, highlight_id > 0);
 
-    GdkRectangle rect = { (int)x, (int)y, 1, 1 };
+    /* Find character line bottom so popover sits below text */
+    int bx, by;
+    gtk_text_view_window_to_buffer_coords(GTK_TEXT_VIEW(state->text_view), GTK_TEXT_WINDOW_WIDGET, (int)x, (int)y, &bx, &by);
+    GtkTextIter iter;
+    gtk_text_view_get_iter_at_location(GTK_TEXT_VIEW(state->text_view), &iter, bx, by);
+    GdkRectangle iter_rect;
+    gtk_text_view_get_iter_location(GTK_TEXT_VIEW(state->text_view), &iter, &iter_rect);
+    int wx, wy;
+    gtk_text_view_buffer_to_window_coords(GTK_TEXT_VIEW(state->text_view), GTK_TEXT_WINDOW_WIDGET, iter_rect.x, iter_rect.y, &wx, &wy);
+
+    GdkRectangle rect = { (int)x, wy + iter_rect.height, 1, 1 };
     gtk_popover_set_pointing_to(GTK_POPOVER(state->highlight_popover), &rect);
     gtk_popover_popup(GTK_POPOVER(state->highlight_popover));
 }
 
 static void build_highlight_popover(CualiAppState *state)
 {
-    state->highlight_popover = gtk_popover_new();
-    gtk_widget_set_parent(state->highlight_popover, state->text_view);
     gtk_popover_set_position(GTK_POPOVER(state->highlight_popover), GTK_POS_BOTTOM);
     /* GTK4 auto-flips position when popover would go off-screen */
     gtk_popover_set_has_arrow(GTK_POPOVER(state->highlight_popover), TRUE);
@@ -652,6 +812,9 @@ on_text_view_released (GtkGestureClick *gesture, int n_press, double x, double y
     
     if (!gtk_text_buffer_get_selection_bounds (buffer, &start, &end)) return;
     
+    /* Place cursor at start of selection */
+    gtk_text_buffer_place_cursor (buffer, &start);
+
     GtkTextIter doc_start;
     gtk_text_buffer_get_start_iter(buffer, &doc_start);
     
@@ -693,12 +856,404 @@ apply_highlight_tag (GtkTextBuffer *buffer, int hl_id, GtkTextIter *start, GtkTe
     
     GtkTextTag *tag = gtk_text_buffer_create_tag (buffer, NULL, 
                                                  "background-rgba", &rgba, 
-                                                 "foreground", "#1a1a1a", 
                                                  NULL);
     g_object_set_data (G_OBJECT (tag), "highlight-id", GINT_TO_POINTER (hl_id));
     gtk_text_buffer_apply_tag (buffer, tag, start, end);
     
     if (hex_color) g_free(hex_color);
+}
+
+static void
+save_document (CualiAppState *state)
+{
+    if (state->current_document_id <= 0 || !state->is_editing) return;
+    
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view));
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds (buffer, &start, &end);
+    char *text = gtk_text_buffer_get_text (buffer, &start, &end, FALSE);
+    
+    db_document_update_contents (state->current_document_id, text);
+    g_free (text);
+    
+    state->has_unsaved_changes = false;
+    if (state->save_btn) gtk_widget_set_sensitive (state->save_btn, FALSE);
+}
+
+static void
+on_save_clicked (GtkButton *btn, gpointer user_data)
+{
+    save_document ((CualiAppState *)user_data);
+}
+
+static void
+on_buffer_changed (GtkTextBuffer *buffer, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->is_editing) {
+        state->has_unsaved_changes = true;
+        if (state->save_btn) gtk_widget_set_sensitive (state->save_btn, TRUE);
+    }
+}
+
+/* ── Busqueda en documento (Ctrl+F) ── */
+
+static void
+search_clear_matches (CualiAppState *state)
+{
+    if (!state->search_match_tag) return;
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view));
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds (buffer, &start, &end);
+    gtk_text_buffer_remove_tag (buffer, state->search_match_tag, &start, &end);
+    if (state->search_current_tag)
+        gtk_text_buffer_remove_tag (buffer, state->search_current_tag, &start, &end);
+    state->search_match_count = 0;
+    state->search_current_match = 0;
+}
+
+static void
+search_find (CualiAppState *state, bool forward)
+{
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view));
+    const char *query = gtk_editable_get_text (GTK_EDITABLE (state->search_entry));
+
+    search_clear_matches (state);
+    if (!query || *query == '\0') return;
+
+    GtkTextIter bound_start, bound_end;
+    gtk_text_buffer_get_bounds (buffer, &bound_start, &bound_end);
+    char *full = gtk_text_buffer_get_text (buffer, &bound_start, &bound_end, FALSE);
+    if (!full) return;
+
+    char *lower_full = g_utf8_strdown (full, -1);
+    char *lower_q = g_utf8_strdown (query, -1);
+    int q_len = strlen (lower_q);
+
+    /* Build list of match character offsets */
+    int *starts = NULL;
+    int *ends = NULL;
+    int count = 0;
+
+    char *pos = lower_full;
+    while ((pos = strstr (pos, lower_q)) != NULL) {
+        int byte_off = pos - lower_full;
+        int cstart = g_utf8_pointer_to_offset (lower_full, lower_full + byte_off);
+        int cend = cstart + g_utf8_strlen (lower_q, -1);
+        starts = g_renew (int, starts, count + 1);
+        ends   = g_renew (int, ends, count + 1);
+        starts[count] = cstart;
+        ends[count] = cend;
+        count++;
+        pos += q_len;
+    }
+
+    /* Find cursor position to determine current match */
+    GtkTextMark *mark = gtk_text_buffer_get_insert (buffer);
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark (buffer, &cursor, mark);
+    int cursor_off = gtk_text_iter_get_offset (&cursor);
+
+    int start_idx = 0;
+    if (forward) {
+        /* Find first match AFTER cursor */
+        for (int i = 0; i < count; i++) {
+            if (starts[i] > cursor_off) { start_idx = i; break; }
+        }
+    } else {
+        /* Find last match BEFORE cursor */
+        for (int i = count - 1; i >= 0; i--) {
+            if (ends[i] < cursor_off) { start_idx = i; break; }
+        }
+    }
+
+    /* Highlight all matches */
+    GtkTextTag *match_tag = state->search_match_tag;
+    for (int i = 0; i < count; i++) {
+        GtkTextIter s, e;
+        gtk_text_buffer_get_iter_at_offset (buffer, &s, starts[i]);
+        gtk_text_buffer_get_iter_at_offset (buffer, &e, ends[i]);
+        gtk_text_buffer_apply_tag (buffer, match_tag, &s, &e);
+    }
+
+    /* Highlight and go to current match */
+    if (count > 0) {
+        GtkTextIter s, e;
+        gtk_text_buffer_get_iter_at_offset (buffer, &s, starts[start_idx]);
+        gtk_text_buffer_get_iter_at_offset (buffer, &e, ends[start_idx]);
+        if (state->search_current_tag)
+            gtk_text_buffer_apply_tag (buffer, state->search_current_tag, &s, &e);
+        gtk_text_buffer_place_cursor (buffer, &s);
+        gtk_text_view_scroll_to_iter (GTK_TEXT_VIEW (state->text_view), &s, 0.0, TRUE, 0.0, 0.0);
+    }
+
+    state->search_match_count = count;
+    state->search_current_match = count > 0 ? start_idx + 1 : 0;
+
+    g_free (starts);
+    g_free (ends);
+    g_free (lower_full);
+    g_free (full);
+    g_free (lower_q);
+}
+
+static gboolean
+on_search_key_pressed (GtkEventControllerKey *controller,
+                       guint keyval, guint keycode, GdkModifierType mod,
+                       gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) {
+        search_find (state, !(mod & GDK_SHIFT_MASK));
+        return GDK_EVENT_STOP;
+    }
+    if (keyval == GDK_KEY_Escape) {
+        gtk_search_bar_set_search_mode (GTK_SEARCH_BAR (state->search_bar), FALSE);
+        search_clear_matches (state);
+        return GDK_EVENT_STOP;
+    }
+    return GDK_EVENT_PROPAGATE;
+}
+
+static void
+on_search_next_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    search_find (state, true);
+}
+
+static void
+on_search_prev_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    search_find (state, false);
+}
+
+static gboolean
+on_search_changed_idle (gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    search_find (state, true);
+    return FALSE;
+}
+
+static void
+on_search_entry_changed (GtkEditable *editable, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    g_idle_add (on_search_changed_idle, state);
+}
+
+/* ── Auto-guardado ── */
+
+static gboolean
+auto_save_cb (gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->is_editing && state->has_unsaved_changes)
+        save_document (state);
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+auto_save_start (CualiAppState *state)
+{
+    if (state->auto_save_id > 0) g_source_remove (state->auto_save_id);
+    state->auto_save_id = g_timeout_add_seconds (30, auto_save_cb, state);
+}
+
+static void
+auto_save_stop (CualiAppState *state)
+{
+    if (state->auto_save_id > 0) {
+        g_source_remove (state->auto_save_id);
+        state->auto_save_id = 0;
+    }
+}
+
+/* ── Atajos de teclado ── */
+
+static gboolean
+on_key_pressed (GtkEventControllerKey *controller,
+                guint keyval, guint keycode, GdkModifierType mod,
+                gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+
+    if (mod & GDK_CONTROL_MASK) {
+        switch (keyval) {
+        case GDK_KEY_f:
+        case GDK_KEY_F:
+            if (!state->is_editing && state->current_document_id > 0) {
+                gtk_search_bar_set_search_mode (GTK_SEARCH_BAR (state->search_bar), TRUE);
+                gtk_widget_grab_focus (state->search_entry);
+                /* Select all text for replacement */
+                gtk_editable_select_region (GTK_EDITABLE (state->search_entry), 0, -1);
+            }
+            return GDK_EVENT_STOP;
+        case GDK_KEY_e:
+        case GDK_KEY_E:
+            if (state->current_document_id > 0) {
+                GtkWidget *btn = state->edit_toggle;
+                g_signal_emit_by_name (btn, "clicked");
+            }
+            return GDK_EVENT_STOP;
+        case GDK_KEY_s:
+        case GDK_KEY_S:
+            if (state->is_editing && state->has_unsaved_changes)
+                save_document (state);
+            return GDK_EVENT_STOP;
+        case GDK_KEY_b:
+        case GDK_KEY_B:
+            if (!state->is_editing && state->current_document_id > 0) {
+                GtkWidget *hl_btn = gtk_widget_get_first_child (gtk_widget_get_parent (state->edit_toggle));
+                if (hl_btn) g_signal_emit_by_name (hl_btn, "clicked");
+            }
+            return GDK_EVENT_STOP;
+        }
+    }
+    return GDK_EVENT_PROPAGATE;
+}
+
+/* ── Arrastrar y soltar archivos ── */
+
+static gboolean
+on_drop (GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->current_project_id <= 0) return FALSE;
+
+    if (G_VALUE_HOLDS (value, GDK_TYPE_FILE_LIST)) {
+        GSList *files = (GSList *)g_value_get_boxed (value);
+        if (!files) return FALSE;
+        int count = 0;
+        for (GSList *l = files; l; l = l->next) {
+            GFile *f = G_FILE (l->data);
+            char *path = g_file_get_path (f);
+            char *name = g_file_get_basename (f);
+            if (!path || !name) { g_free(path); g_free(name); continue; }
+
+            char *html = NULL;
+            char *lower = g_ascii_strdown (name, -1);
+            if (g_str_has_suffix (lower, ".pdf"))
+                html = importer_pdf_to_html (path);
+            else {
+                gsize length;
+                char *raw = NULL;
+                if (g_file_load_contents (f, NULL, &raw, &length, NULL, NULL)) {
+                    if (raw && (g_strstr_len (raw, 200, "<p") || g_strstr_len (raw, 200, "<html")))
+                        html = raw;
+                    else {
+                        html = importer_text_to_html (raw);
+                        g_free (raw);
+                    }
+                }
+            }
+            g_free (lower);
+
+            if (html && *html) {
+                char *backup = g_strdup_printf ("%s.backup", db_get_path());
+                GFile *src = g_file_new_for_path (db_get_path());
+                GFile *dst = g_file_new_for_path (backup);
+                g_file_copy (src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, NULL);
+                g_object_unref (src); g_object_unref (dst);
+                g_free (backup);
+                db_document_add (state->current_project_id, name, html);
+                count++;
+            }
+            g_free (html); g_free (path); g_free (name);
+        }
+        refresh_documents (state);
+        if (count > 0) {
+            char msg[64];
+            snprintf (msg, sizeof (msg), "%d documento(s) importado(s)", count);
+            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
+                                         adw_toast_new (msg));
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* ── Barra de estado ── */
+
+static void
+update_status_bar (CualiAppState *state)
+{
+    if (!state->status_label || state->current_document_id <= 0) {
+        if (state->status_label)
+            gtk_label_set_text (GTK_LABEL (state->status_label), "");
+        return;
+    }
+
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view));
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds (buffer, &start, &end);
+    char *text = gtk_text_buffer_get_text (buffer, &start, &end, FALSE);
+
+    if (!text) { gtk_label_set_text (GTK_LABEL (state->status_label), ""); return; }
+
+    int char_count = g_utf8_strlen (text, -1);
+    int word_count = 0;
+    bool in_word = false;
+    for (const char *p = text; *p; p = g_utf8_next_char (p)) {
+        gunichar c = g_utf8_get_char (p);
+        if (g_unichar_isalpha (c)) {
+            if (!in_word) { word_count++; in_word = true; }
+        } else {
+            in_word = false;
+        }
+    }
+
+    int hl_count = 0;
+    sqlite3_stmt *stmt = db_highlights_get_for_document (state->current_document_id);
+    if (stmt) {
+        while (sqlite3_step (stmt) == SQLITE_ROW) hl_count++;
+        sqlite3_finalize (stmt);
+    }
+
+    char *markup = g_strdup_printf ("<span size='small'>%d palabras · %d caracteres · %d highlights</span>",
+                                    word_count, char_count, hl_count);
+    gtk_label_set_markup (GTK_LABEL (state->status_label), markup);
+    g_free (markup);
+    g_free (text);
+}
+
+static void
+on_alert_response (AdwAlertDialog *self, const char *response, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (strcmp (response, "save") == 0) {
+        save_document (state);
+        gtk_window_destroy (GTK_WINDOW (state->window));
+    } else if (strcmp (response, "discard") == 0) {
+        state->has_unsaved_changes = false;
+        gtk_window_destroy (GTK_WINDOW (state->window));
+    }
+}
+
+static gboolean
+on_window_close_request (GtkWindow *window, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->is_editing && state->has_unsaved_changes) {
+        AdwDialog *dialog = adw_alert_dialog_new ("¿Guardar cambios?", 
+                                                 "Hay cambios sin guardar en el documento actual.");
+        adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (dialog),
+                                       "cancel", "Cancelar",
+                                       "discard", "Descartar",
+                                       "save", "Guardar",
+                                       NULL);
+        adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "discard", ADW_RESPONSE_DESTRUCTIVE);
+        adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "save", ADW_RESPONSE_SUGGESTED);
+        adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "save");
+        adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
+        
+        g_signal_connect (dialog, "response", G_CALLBACK (on_alert_response), state);
+        adw_dialog_present (dialog, state->window);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 static void
@@ -714,19 +1269,25 @@ on_edit_toggle_clicked (GtkButton *button, gpointer user_data)
     gtk_text_view_set_editable (GTK_TEXT_VIEW (state->text_view), TRUE);
     gtk_button_set_icon_name (GTK_BUTTON (state->edit_toggle), "document-save-symbolic");
     gtk_text_buffer_remove_tag_by_name (buffer, "highlight", NULL, NULL);
+    if (state->save_btn) gtk_widget_set_visible (state->save_btn, TRUE);
+    auto_save_start (state);
+    adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
+                                 adw_toast_new ("Modo edición — auto-guardado cada 30s"));
   } else {
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds (buffer, &start, &end);
-    char *text = gtk_text_buffer_get_text (buffer, &start, &end, FALSE);
-    
-    db_document_update_contents (state->current_document_id, text);
+    auto_save_stop (state);
+    save_document (state);
     
     gtk_text_view_set_editable (GTK_TEXT_VIEW (state->text_view), FALSE);
     gtk_button_set_icon_name (GTK_BUTTON (state->edit_toggle), "document-edit-symbolic");
+    if (state->save_btn) gtk_widget_set_visible (state->save_btn, FALSE);
     
+    /* Load to refresh highlights */
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds (buffer, &start, &end);
+    char *text = gtk_text_buffer_get_text (buffer, &start, &end, FALSE);
     load_document (state, state->current_document_id, "dummy", text);
-    
     g_free (text);
+    
     refresh_documents (state);
   }
 }
@@ -776,7 +1337,7 @@ refresh_results_tags (CualiAppState *state)
       
       GtkWidget *dot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
       gtk_widget_set_size_request(dot, 10, 10);
-      char *css = g_strdup_printf("box { background-color: %s; border-radius: 5px; }", color ? color : "#888888");
+      char *css = g_strdup_printf("box { background-color: %s; border-radius: 5px; }", color ? color : "#77767b");
       GtkCssProvider *provider = gtk_css_provider_new();
       gtk_css_provider_load_from_string(provider, css);
       gtk_style_context_add_provider(gtk_widget_get_style_context(dot),
@@ -789,6 +1350,7 @@ refresh_results_tags (CualiAppState *state)
       GtkWidget *label = gtk_label_new (path);
       gtk_widget_set_halign (label, GTK_ALIGN_START);
       gtk_widget_set_hexpand (label, TRUE);
+      gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
       gtk_box_append (GTK_BOX (box), label);
       
       if (count > 0) {
@@ -818,89 +1380,218 @@ refresh_results_tags (CualiAppState *state)
   }
 }
 
-static void on_sidebar_new_tag_activated(GtkEntry *entry, gpointer user_data) {
+/* ── Etiquetas jerarquicas ── */
+
+typedef struct _TagNode {
+    char *name;
+    int tag_id;
+    char *color;
+    int count;
+    GList *children;
+} TagNode;
+
+static TagNode*
+tag_node_new (const char *name)
+{
+    TagNode *n = g_new0 (TagNode, 1);
+    n->name = g_strdup (name);
+    n->tag_id = -1;
+    return n;
+}
+
+static void
+tag_node_free (TagNode *n)
+{
+    if (!n) return;
+    g_free (n->name);
+    g_free (n->color);
+    g_list_free_full (n->children, (GDestroyNotify) tag_node_free);
+    g_free (n);
+}
+
+static int
+tag_node_find_child (GList *children, const char *name)
+{
+    int i = 0;
+    for (GList *l = children; l; l = l->next, i++) {
+        TagNode *c = (TagNode *)l->data;
+        if (g_strcmp0 (c->name, name) == 0) return i;
+    }
+    return -1;
+}
+
+static GtkWidget*
+create_colored_dot (const char *color, int size)
+{
+    GtkWidget *dot = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_size_request (dot, size, size);
+    char *css = g_strdup_printf ("box { background-color: %s; border-radius: %dpx; min-width: %dpx; min-height: %dpx; }",
+                                 color && *color ? color : "#77767b", size/2, size, size);
+    GtkCssProvider *p = gtk_css_provider_new ();
+    gtk_css_provider_load_from_string (p, css);
+    gtk_style_context_add_provider (gtk_widget_get_style_context (dot),
+                                    GTK_STYLE_PROVIDER (p),
+                                    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_free (css);
+    gtk_widget_set_valign (dot, GTK_ALIGN_CENTER);
+    return dot;
+}
+
+static void
+on_sidebar_new_tag_activated (GtkEntry *entry, gpointer user_data)
+{
     CualiAppState *state = (CualiAppState *)user_data;
-    const char *text = gtk_editable_get_text(GTK_EDITABLE(entry));
+    const char *text = gtk_editable_get_text (GTK_EDITABLE (entry));
     if (text && *text != '\0') {
         int count = 0;
-        sqlite3_stmt *stmt = db_tags_get_stats(state->current_project_id);
+        sqlite3_stmt *stmt = db_tags_get_stats (state->current_project_id);
         if (stmt) {
-            while (sqlite3_step(stmt) == SQLITE_ROW) count++;
-            sqlite3_finalize(stmt);
+            while (sqlite3_step (stmt) == SQLITE_ROW) count++;
+            sqlite3_finalize (stmt);
         }
         const char *color = TAG_COLORS[count % TAG_COLORS_COUNT];
-        
-        db_tag_add(state->current_project_id, text, "", color);
-        gtk_editable_set_text(GTK_EDITABLE(entry), "");
-        refresh_tags(state);
+        db_tag_add (state->current_project_id, text, "", color);
+        gtk_editable_set_text (GTK_EDITABLE (entry), "");
+        refresh_tags (state);
     }
 }
 
-static void refresh_tags(CualiAppState *state) {
+static void
+refresh_tags (CualiAppState *state)
+{
     if (!state->tag_list) return;
 
     GtkWidget *child;
-    while ((child = gtk_widget_get_first_child(state->tag_list))) {
-        gtk_list_box_remove(GTK_LIST_BOX(state->tag_list), child);
-    }
+    while ((child = gtk_widget_get_first_child (state->tag_list)))
+        gtk_list_box_remove (GTK_LIST_BOX (state->tag_list), child);
 
-    sqlite3_stmt *stmt = db_tags_get_stats(state->current_project_id);
+    sqlite3_stmt *stmt = db_tags_get_stats (state->current_project_id);
     if (!stmt) return;
 
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        int tag_id = sqlite3_column_int(stmt, 0);
-        const char *path = (const char *)sqlite3_column_text(stmt, 1);
-        const char *color = (const char *)sqlite3_column_text(stmt, 2);
-        int count = sqlite3_column_int(stmt, 3);
+    /* Build tree from tag paths */
+    TagNode root = {0};
+    root.name = NULL;
 
-        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-        gtk_widget_set_margin_start(box, 12);
-        gtk_widget_set_margin_end(box, 12);
-        gtk_widget_set_margin_top(box, 8);
-        gtk_widget_set_margin_bottom(box, 8);
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+        int tag_id = sqlite3_column_int (stmt, 0);
+        const char *path = (const char *)sqlite3_column_text (stmt, 1);
+        const char *color = (const char *)sqlite3_column_text (stmt, 2);
+        int count = sqlite3_column_int (stmt, 3);
 
-        GtkWidget *dot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-        gtk_widget_set_size_request(dot, 10, 10);
-        char *css = g_strdup_printf("box { background-color: %s; border-radius: 5px; }", color ? color : "#888888");
-        GtkCssProvider *provider = gtk_css_provider_new();
-        gtk_css_provider_load_from_string(provider, css);
-        gtk_style_context_add_provider(gtk_widget_get_style_context(dot),
-                                       GTK_STYLE_PROVIDER(provider),
-                                       GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        g_free(css);
-        gtk_widget_set_valign(dot, GTK_ALIGN_CENTER);
-        gtk_box_append(GTK_BOX(box), dot);
+        char **parts = g_strsplit (path, "/", -1);
+        int n_parts = g_strv_length (parts);
 
-        GtkWidget *label = gtk_label_new(path);
-        gtk_widget_set_hexpand(label, TRUE);
-        gtk_widget_set_halign(label, GTK_ALIGN_START);
-        gtk_box_append(GTK_BOX(box), label);
+        TagNode *parent = &root;
+        for (int i = 0; i < n_parts; i++) {
+            int idx = tag_node_find_child (parent->children, parts[i]);
+            if (idx >= 0) {
+                parent = (TagNode *)g_list_nth_data (parent->children, idx);
+            } else {
+                TagNode *n = tag_node_new (parts[i]);
+                parent->children = g_list_append (parent->children, n);
+                parent = n;
+            }
+        }
+        /* Leaf: store tag data */
+        parent->tag_id = tag_id;
+        parent->color = g_strdup (color);
+        parent->count = count;
+        g_strfreev (parts);
+    }
+    sqlite3_finalize (stmt);
 
-        if (count > 0) {
-            char *count_str = g_strdup_printf("%d", count);
-            GtkWidget *count_label = gtk_label_new(count_str);
-            gtk_widget_add_css_class(count_label, "numeric");
-            gtk_widget_add_css_class(count_label, "dim-label");
-            gtk_box_append(GTK_BOX(box), count_label);
-            g_free(count_str);
+    /* Flatten tree into list box rows via recursive helper */
+    typedef struct { TagNode *node; GtkListBox *list; CualiAppState *state; int depth; } FlattenCtx;
+
+    GList *queue = NULL;
+    /* Start with root's children */
+    for (GList *l = root.children; l; l = l->next) {
+        FlattenCtx *ctx = g_new (FlattenCtx, 1);
+        ctx->node = (TagNode *)l->data;
+        ctx->list = GTK_LIST_BOX (state->tag_list);
+        ctx->state = state;
+        ctx->depth = 0;
+        queue = g_list_append (queue, ctx);
+    }
+
+    while (queue) {
+        FlattenCtx *ctx = (FlattenCtx *)queue->data;
+        queue = g_list_delete_link (queue, queue);
+        TagNode *n = ctx->node;
+        bool is_leaf = (n->tag_id > 0);
+        int depth = ctx->depth;
+
+        GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_widget_set_margin_start (box, 12 + (depth * 20));
+        gtk_widget_set_margin_end (box, 12);
+        gtk_widget_set_margin_top (box, depth == 0 ? 10 : 6);
+        gtk_widget_set_margin_bottom (box, depth == 0 ? 6 : 6);
+
+        GtkWidget *dot = create_colored_dot (n->color, depth == 0 ? 8 : 10);
+        gtk_box_append (GTK_BOX (box), dot);
+
+        GtkWidget *label = gtk_label_new (n->name);
+        gtk_widget_set_hexpand (label, TRUE);
+        gtk_widget_set_halign (label, GTK_ALIGN_START);
+        gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+        if (depth == 0)
+            gtk_widget_add_css_class (label, "heading");
+        else
+            gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
+        gtk_box_append (GTK_BOX (box), label);
+
+        if (is_leaf && n->count > 0) {
+            char *cs = g_strdup_printf ("%d", n->count);
+            GtkWidget *cl = gtk_label_new (cs);
+            gtk_widget_add_css_class (cl, "numeric");
+            gtk_widget_add_css_class (cl, "dim-label");
+            gtk_box_append (GTK_BOX (box), cl);
+            g_free (cs);
         }
 
-        GtkWidget *edit_btn2 = gtk_button_new_from_icon_name ("document-edit-symbolic");
-        gtk_widget_add_css_class (edit_btn2, "flat");
-        gtk_widget_set_valign (edit_btn2, GTK_ALIGN_CENTER);
-        gtk_widget_set_tooltip_text (edit_btn2, "Editar etiqueta");
-        gpointer *ebargs2 = g_new (gpointer, 2);
-        ebargs2[0] = state; ebargs2[1] = GINT_TO_POINTER(tag_id);
-        g_signal_connect_data (edit_btn2, "clicked", G_CALLBACK (on_tag_edit_btn_clicked),
-                               ebargs2, (GClosureNotify)g_free, 0);
-        gtk_box_append (GTK_BOX(box), edit_btn2);
+        if (is_leaf) {
+            GtkWidget *eb = gtk_button_new_from_icon_name ("document-edit-symbolic");
+            gtk_widget_add_css_class (eb, "flat");
+            gtk_widget_set_valign (eb, GTK_ALIGN_CENTER);
+            gtk_widget_set_tooltip_text (eb, "Editar etiqueta");
+            gpointer *args = g_new (gpointer, 2);
+            args[0] = ctx->state; args[1] = GINT_TO_POINTER (n->tag_id);
+            g_signal_connect_data (eb, "clicked", G_CALLBACK (on_tag_edit_btn_clicked),
+                                   args, (GClosureNotify) g_free, 0);
+            gtk_box_append (GTK_BOX (box), eb);
+        }
 
-        GtkListBoxRow *row = GTK_LIST_BOX_ROW(gtk_list_box_row_new());
-        gtk_list_box_row_set_child(row, box);
-        g_object_set_data(G_OBJECT(row), "tag-id", GINT_TO_POINTER(tag_id));
-        gtk_list_box_append(GTK_LIST_BOX(state->tag_list), GTK_WIDGET(row));
+        if (depth > 0 || !is_leaf) {
+            GtkWidget *arrow = gtk_image_new_from_icon_name (is_leaf ? NULL : "go-next-symbolic");
+            if (!is_leaf) {
+                gtk_widget_set_valign (arrow, GTK_ALIGN_CENTER);
+                gtk_widget_set_opacity (arrow, 0.4);
+                gtk_box_append (GTK_BOX (box), arrow);
+            }
+        }
+
+        GtkListBoxRow *row = GTK_LIST_BOX_ROW (gtk_list_box_row_new ());
+        gtk_list_box_row_set_selectable (row, is_leaf);
+        gtk_list_box_row_set_child (row, box);
+        if (is_leaf)
+            g_object_set_data (G_OBJECT (row), "tag-id", GINT_TO_POINTER (n->tag_id));
+        gtk_list_box_append (ctx->list, GTK_WIDGET (row));
+        g_free (ctx);
+
+        /* Enqueue children for non-leaf */
+        if (!is_leaf || depth == 0) {
+            for (GList *l = n->children; l; l = l->next) {
+                FlattenCtx *c = g_new (FlattenCtx, 1);
+                c->node = (TagNode *)l->data;
+                c->list = GTK_LIST_BOX (state->tag_list);
+                c->state = state;
+                c->depth = depth + 1;
+                queue = g_list_append (queue, c);
+            }
+        }
     }
-    sqlite3_finalize(stmt);
+
+    g_list_free_full (root.children, (GDestroyNotify) tag_node_free);
 }
 
 static void
@@ -963,44 +1654,44 @@ refresh_results (CualiAppState *state)
 
 
 static void
-load_document (CualiAppState *state, int document_id, const char *name, const char *contents)
+update_zoom (CualiAppState *state)
 {
-  state->current_document_id = document_id;
-  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view));
-  
-  gtk_text_buffer_set_text (buffer, "", 0);
-  
-  if (state->offset_map) g_free (state->offset_map);
-  char *clean_text = map_html (contents, &state->offset_map, &state->plain_text_len);
-  
-  gtk_text_buffer_set_text (buffer, clean_text ? clean_text : "", -1);
-  /* NOTE: do NOT free clean_text here — used below for offset calculations */
-  
-  sqlite3_stmt *stmt = db_highlights_get_for_document (document_id);
-  if (stmt) {
-    while (sqlite3_step (stmt) == SQLITE_ROW) {
-      int start_off = sqlite3_column_int (stmt, 0);
-      int end_off = sqlite3_column_int (stmt, 1);
-      int hl_id = sqlite3_column_int (stmt, 2);
-      
-      if (clean_text) {
-          int len = (int)strlen (clean_text);
-          int p_start = start_off < 0 ? 0 : (start_off > len ? len : start_off);
-          int p_end   = end_off   < p_start ? p_start : (end_off > len ? len : end_off);
-          
-          int char_start = (int)g_utf8_pointer_to_offset (clean_text, clean_text + p_start);
-          int char_end   = (int)g_utf8_pointer_to_offset (clean_text, clean_text + p_end);
-          
-          GtkTextIter start_iter, end_iter;
-          gtk_text_buffer_get_iter_at_offset (buffer, &start_iter, char_start);
-          gtk_text_buffer_get_iter_at_offset (buffer, &end_iter, char_end);
-          apply_highlight_tag (buffer, hl_id, &start_iter, &end_iter);
-      }
+    if (!state->font_provider) {
+        state->font_provider = gtk_css_provider_new ();
+        gtk_style_context_add_provider (gtk_widget_get_style_context (state->text_view),
+                                       GTK_STYLE_PROVIDER (state->font_provider),
+                                       GTK_STYLE_PROVIDER_PRIORITY_USER);
     }
-    sqlite3_finalize (stmt);
-  }
-  
-  g_free (clean_text);
+    char zoom_str[32];
+    g_ascii_formatd (zoom_str, sizeof (zoom_str), "%.1f", 12.0 * state->zoom_level);
+    char *css = g_strdup_printf ("textview { font-size: %spt; }", zoom_str);
+    gtk_css_provider_load_from_string (state->font_provider, css);
+    g_free (css);
+}
+
+static void
+on_zoom_in_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    state->zoom_level *= 1.1;
+    if (state->zoom_level > 5.0) state->zoom_level = 5.0;
+    update_zoom (state);
+}
+
+static void
+on_zoom_out_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    state->zoom_level /= 1.1;
+    if (state->zoom_level < 0.2) state->zoom_level = 0.2;
+    update_zoom (state);
+}
+
+static void
+on_doc_sidebar_toggle (GtkToggleButton *btn, gpointer user_data)
+{
+    AdwOverlaySplitView *sv = ADW_OVERLAY_SPLIT_VIEW (user_data);
+    adw_overlay_split_view_set_show_sidebar (sv, gtk_toggle_button_get_active (btn));
 }
 
 static void
@@ -1025,6 +1716,17 @@ on_doc_imported (GObject *source_object, GAsyncResult *res, gpointer user_data)
   CualiAppState *state = (CualiAppState *)user_data;
   GFile *file = gtk_file_dialog_open_finish (dialog, res, NULL);
   if (file == NULL) return;
+
+  const char *db_path = db_get_path();
+  if (db_path) {
+      char *backup_path = g_strdup_printf("%s.backup", db_path);
+      GFile *src = g_file_new_for_path(db_path);
+      GFile *dst = g_file_new_for_path(backup_path);
+      g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, NULL);
+      g_object_unref(src);
+      g_object_unref(dst);
+      g_free(backup_path);
+  }
 
   char *path = g_file_get_path (file);
   char *name = g_file_get_basename (file);
@@ -1086,6 +1788,7 @@ refresh_documents (CualiAppState *state)
       gtk_widget_set_margin_top (label, 10);
       gtk_widget_set_margin_bottom (label, 10);
       gtk_widget_set_hexpand (label, TRUE);
+      gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
       gtk_box_append (GTK_BOX (box), label);
       
       GtkWidget *delete_btn = gtk_button_new_from_icon_name ("user-trash-symbolic");
@@ -1329,6 +2032,19 @@ on_open_project_clicked (GtkButton *button, gpointer user_data)
 }
 
 static void
+on_about_action (GtkButton *button, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    adw_show_about_dialog (state->window,
+                          "application-name", "Cuali",
+                          "application-icon", "org.gnome.TextEditor-symbolic",
+                          "version", "0.1.0",
+                          "comments", "Herramienta de análisis cualitativo",
+                          "developer-name", "Diego Veraniego",
+                          NULL);
+}
+
+static void
 on_add_button_clicked (GtkButton *button, gpointer user_data)
 {
   CualiAppState *state = (CualiAppState *)user_data;
@@ -1348,6 +2064,7 @@ on_view_stack_visible_child_changed (GObject *object, GParamSpec *pspec, gpointe
 void window_init(GtkApplication *app) {
     CualiAppState *state = g_new0 (CualiAppState, 1);
     state->current_document_id = -1;
+    state->zoom_level = 1.0;
 
     GtkCssProvider *provider = gtk_css_provider_new ();
     gtk_css_provider_load_from_string (provider, style_css);
@@ -1359,6 +2076,7 @@ void window_init(GtkApplication *app) {
     state->window = window;
     gtk_window_set_title(GTK_WINDOW(window), "Cuali GTK");
     gtk_window_set_default_size(GTK_WINDOW(window), 1100, 800);
+    g_signal_connect (window, "close-request", G_CALLBACK (on_window_close_request), state);
 
     state->root_stack = adw_view_stack_new ();
     gtk_widget_set_vexpand (state->root_stack, TRUE);
@@ -1461,9 +2179,35 @@ void window_init(GtkApplication *app) {
     state->edit_toggle = gtk_button_new_from_icon_name ("document-edit-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), state->edit_toggle);
     g_signal_connect (state->edit_toggle, "clicked", G_CALLBACK (on_edit_toggle_clicked), state);
+
+    state->save_btn = gtk_button_new_with_label ("Guardar");
+    gtk_widget_add_css_class (state->save_btn, "suggested-action");
+    gtk_widget_set_visible (state->save_btn, FALSE);
+    gtk_widget_set_sensitive (state->save_btn, FALSE);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), state->save_btn);
+    g_signal_connect (state->save_btn, "clicked", G_CALLBACK (on_save_clicked), state);
     
-    GtkWidget *export_button = gtk_button_new_from_icon_name ("document-save-symbolic");
-    adw_header_bar_pack_end (ADW_HEADER_BAR (header_bar), export_button);
+    /* Primary menu (gear) */
+    GtkWidget *menu_btn = gtk_menu_button_new ();
+    gtk_widget_add_css_class (menu_btn, "flat");
+    gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (menu_btn), "open-menu-symbolic");
+
+    GtkWidget *menu_popover = gtk_popover_new ();
+    GtkWidget *menu_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+
+    GtkWidget *import_item = gtk_button_new_with_label ("Importar documento…");
+    gtk_widget_set_halign (import_item, GTK_ALIGN_START);
+    g_signal_connect (import_item, "clicked", G_CALLBACK (on_add_button_clicked), state);
+    gtk_box_append (GTK_BOX (menu_box), import_item);
+
+    GtkWidget *about_item = gtk_button_new_with_label ("Acerca de Cuali");
+    gtk_widget_set_halign (about_item, GTK_ALIGN_START);
+    g_signal_connect (about_item, "clicked", G_CALLBACK (on_about_action), state);
+    gtk_box_append (GTK_BOX (menu_box), about_item);
+
+    gtk_popover_set_child (GTK_POPOVER (menu_popover), menu_box);
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (menu_btn), menu_popover);
+    adw_header_bar_pack_end (ADW_HEADER_BAR (header_bar), menu_btn);
 
     /* --- Pestaña 1: Información --- */
     GtkWidget *info_page = adw_preferences_page_new ();
@@ -1500,10 +2244,14 @@ void window_init(GtkApplication *app) {
     gtk_widget_add_css_class (sidebar_box, "sidebar");
     adw_overlay_split_view_set_sidebar(ADW_OVERLAY_SPLIT_VIEW(split_view), sidebar_box);
     
-    GtkWidget *docs_title = gtk_label_new("Documentos");
-    gtk_widget_add_css_class (docs_title, "sidebar-title");
-    gtk_widget_set_halign (docs_title, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(sidebar_box), docs_title);
+    /* ── Document filter ── */
+    state->doc_filter_entry = gtk_search_entry_new ();
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->doc_filter_entry), "Filtrar documentos…");
+    gtk_widget_set_margin_start (state->doc_filter_entry, 8);
+    gtk_widget_set_margin_end (state->doc_filter_entry, 8);
+    gtk_widget_set_margin_top (state->doc_filter_entry, 8);
+    gtk_widget_set_margin_bottom (state->doc_filter_entry, 4);
+    gtk_box_append (GTK_BOX (sidebar_box), state->doc_filter_entry);
 
     GtkWidget *scrolled_docs = gtk_scrolled_window_new ();
     gtk_widget_set_vexpand (scrolled_docs, TRUE);
@@ -1513,11 +2261,19 @@ void window_init(GtkApplication *app) {
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_docs), state->doc_list);
     g_signal_connect (state->doc_list, "row-selected", G_CALLBACK (on_doc_row_selected), state);
 
-    GtkWidget *tags_title = gtk_label_new("Etiquetas");
-    gtk_widget_add_css_class (tags_title, "sidebar-title");
-    gtk_widget_set_halign (tags_title, GTK_ALIGN_START);
-    gtk_widget_set_margin_top (tags_title, 20);
-    gtk_box_append(GTK_BOX(sidebar_box), tags_title);
+    /* [REORGANIZACIÓN ETIQUETAS] */
+    GtkWidget *tag_entry_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_margin_top(tag_entry_box, 20);
+    gtk_widget_set_margin_bottom(tag_entry_box, 8);
+    gtk_widget_set_margin_start(tag_entry_box, 12);
+    gtk_widget_set_margin_end(tag_entry_box, 12);
+    gtk_box_append(GTK_BOX(sidebar_box), tag_entry_box);
+
+    GtkWidget *tag_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(tag_entry), "+ Nueva etiqueta...");
+    gtk_widget_set_hexpand(tag_entry, TRUE);
+    g_signal_connect(tag_entry, "activate", G_CALLBACK(on_sidebar_new_tag_activated), state);
+    gtk_box_append(GTK_BOX(tag_entry_box), tag_entry);
 
     GtkWidget *scrolled_tags = gtk_scrolled_window_new ();
     gtk_widget_set_vexpand (scrolled_tags, TRUE);
@@ -1528,34 +2284,114 @@ void window_init(GtkApplication *app) {
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (state->tag_list), GTK_SELECTION_NONE);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_tags), state->tag_list);
 
-    GtkWidget *tag_entry_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_margin_top(tag_entry_box, 10);
-    gtk_box_append(GTK_BOX(sidebar_box), tag_entry_box);
+    /* Content view with toolbar */
+    GtkWidget *doc_content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(split_view), doc_content_vbox);
 
-    GtkWidget *tag_entry = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(tag_entry), "+ Nueva etiqueta...");
-    gtk_widget_set_hexpand(tag_entry, TRUE);
-    g_signal_connect(tag_entry, "activate", G_CALLBACK(on_sidebar_new_tag_activated), state);
-    gtk_box_append(GTK_BOX(tag_entry_box), tag_entry);
+    GtkWidget *doc_toolbar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class (doc_toolbar, "toolbar");
+    gtk_widget_set_margin_start (doc_toolbar, 12);
+    gtk_widget_set_margin_end (doc_toolbar, 12);
+    gtk_widget_set_margin_top (doc_toolbar, 8);
+    gtk_widget_set_margin_bottom (doc_toolbar, 8);
+    gtk_box_append (GTK_BOX (doc_content_vbox), doc_toolbar);
 
+    GtkWidget *doc_toggle_btn = gtk_toggle_button_new ();
+    GtkWidget *doc_toggle_icon = gtk_image_new_from_icon_name ("sidebar-show-symbolic");
+    gtk_button_set_child (GTK_BUTTON (doc_toggle_btn), doc_toggle_icon);
+    gtk_widget_add_css_class (doc_toggle_btn, "flat");
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (doc_toggle_btn), TRUE);
+    gtk_widget_set_tooltip_text (doc_toggle_btn, "Mostrar/ocultar documentos");
+    gtk_box_append (GTK_BOX (doc_toolbar), doc_toggle_btn);
+    g_signal_connect (doc_toggle_btn, "toggled", G_CALLBACK (on_doc_sidebar_toggle), split_view);
+
+    GtkWidget *zoom_out_btn = gtk_button_new_from_icon_name ("zoom-out-symbolic");
+    gtk_widget_add_css_class (zoom_out_btn, "flat");
+    gtk_widget_set_margin_start (zoom_out_btn, 12);
+    gtk_box_append (GTK_BOX (doc_toolbar), zoom_out_btn);
+    g_signal_connect (zoom_out_btn, "clicked", G_CALLBACK (on_zoom_out_clicked), state);
+
+    GtkWidget *zoom_in_btn = gtk_button_new_from_icon_name ("zoom-in-symbolic");
+    gtk_widget_add_css_class (zoom_in_btn, "flat");
+    gtk_box_append (GTK_BOX (doc_toolbar), zoom_in_btn);
+    g_signal_connect (zoom_in_btn, "clicked", G_CALLBACK (on_zoom_in_clicked), state);
+
+    GtkWidget *doc_sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_append (GTK_BOX (doc_content_vbox), doc_sep);
+
+    /* ── Search bar (Ctrl+F) ── */
+    state->search_bar = gtk_search_bar_new ();
+    gtk_widget_set_child_visible (state->search_bar, FALSE);
+    GtkWidget *search_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_margin_start (search_box, 12);
+    gtk_widget_set_margin_end (search_box, 12);
+    gtk_widget_set_margin_top (search_box, 6);
+    gtk_widget_set_margin_bottom (search_box, 6);
+
+    state->search_entry = gtk_search_entry_new ();
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->search_entry), "Buscar en el documento…");
+    gtk_widget_set_hexpand (state->search_entry, TRUE);
+    gtk_search_bar_set_child (GTK_SEARCH_BAR (state->search_bar), search_box);
+    gtk_search_bar_connect_entry (GTK_SEARCH_BAR (state->search_bar), GTK_EDITABLE (state->search_entry));
+    gtk_box_append (GTK_BOX (search_box), state->search_entry);
+
+    GtkWidget *search_prev = gtk_button_new_from_icon_name ("go-up-symbolic");
+    gtk_widget_add_css_class (search_prev, "flat");
+    gtk_widget_set_tooltip_text (search_prev, "Anterior (Shift+Enter)");
+    g_signal_connect (search_prev, "clicked", G_CALLBACK (on_search_prev_clicked), state);
+    gtk_box_append (GTK_BOX (search_box), search_prev);
+
+    GtkWidget *search_next = gtk_button_new_from_icon_name ("go-down-symbolic");
+    gtk_widget_add_css_class (search_next, "flat");
+    gtk_widget_set_tooltip_text (search_next, "Siguiente (Enter)");
+    g_signal_connect (search_next, "clicked", G_CALLBACK (on_search_next_clicked), state);
+    gtk_box_append (GTK_BOX (search_box), search_next);
+
+    gtk_box_append (GTK_BOX (doc_content_vbox), state->search_bar);
+
+    /* Search key controller */
+    GtkEventController *search_key = gtk_event_controller_key_new ();
+    gtk_widget_add_controller (state->search_entry, search_key);
+    g_signal_connect (search_key, "key-pressed", G_CALLBACK (on_search_key_pressed), state);
+
+    g_signal_connect (state->search_entry, "search-changed", G_CALLBACK (on_search_entry_changed), state);
+
+    /* ── Content scroll with paper ── */
     GtkWidget *content_scroll = gtk_scrolled_window_new ();
-    adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(split_view), content_scroll);
+    gtk_widget_set_vexpand (content_scroll, TRUE);
+    gtk_box_append (GTK_BOX (doc_content_vbox), content_scroll);
+
+    /* Drop target for files */
+    GtkDropTarget *drop_target = gtk_drop_target_new (GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
+    g_signal_connect (drop_target, "drop", G_CALLBACK (on_drop), state);
+    gtk_widget_add_controller (content_scroll, GTK_EVENT_CONTROLLER (drop_target));
+
     GtkWidget *paper_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class (paper_box, "paper-sheet");
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (content_scroll), paper_box);
     GtkWidget *text_view = gtk_text_view_new();
     state->text_view = text_view;
+    g_signal_connect (gtk_text_view_get_buffer (GTK_TEXT_VIEW (text_view)), "changed", G_CALLBACK (on_buffer_changed), state);
     
+    /* Create popover once and parent it */
+    state->highlight_popover = gtk_popover_new();
+    gtk_widget_set_parent(state->highlight_popover, text_view);
+    build_highlight_popover(state);
+
     GtkGesture *click_gesture = gtk_gesture_click_new ();
     g_signal_connect (click_gesture, "pressed", G_CALLBACK (on_text_view_clicked), state);
     g_signal_connect (click_gesture, "released", G_CALLBACK (on_text_view_released), state);
-    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click_gesture), GTK_PHASE_CAPTURE);
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click_gesture), GTK_PHASE_BUBBLE);
     gtk_widget_add_controller (text_view, GTK_EVENT_CONTROLLER (click_gesture));
-    
-    /* Defer popover creation until text_view is realized so it has
-       a native surface — avoids "GtkPopover is not a child" warning */
-    g_signal_connect(text_view, "realize",
-                     G_CALLBACK(on_text_view_realized), state);
+
+    /* Create search match tags */
+    {
+        GtkTextBuffer *buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (text_view));
+        GdkRGBA sb; gdk_rgba_parse (&sb, "#f9f06b"); sb.alpha = 0.3;
+        state->search_match_tag = gtk_text_buffer_create_tag (buf, NULL, "background-rgba", &sb, NULL);
+        GdkRGBA cb; gdk_rgba_parse (&cb, "#ff7800"); cb.alpha = 0.5;
+        state->search_current_tag = gtk_text_buffer_create_tag (buf, NULL, "background-rgba", &cb, NULL);
+    }
 
     gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD_CHAR);
@@ -1566,6 +2402,20 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_hexpand(text_view, TRUE);
     gtk_widget_set_vexpand(text_view, TRUE);
     gtk_box_append (GTK_BOX (paper_box), text_view);
+
+    /* ── Status bar ── */
+    GtkWidget *status_bar_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_margin_start (status_bar_box, 12);
+    gtk_widget_set_margin_end (status_bar_box, 12);
+    gtk_widget_set_margin_top (status_bar_box, 2);
+    gtk_widget_set_margin_bottom (status_bar_box, 4);
+    state->status_label = gtk_label_new ("");
+    gtk_widget_set_halign (state->status_label, GTK_ALIGN_END);
+    gtk_widget_set_hexpand (state->status_label, TRUE);
+    gtk_widget_set_opacity (state->status_label, 0.6);
+    gtk_label_set_xalign (GTK_LABEL (state->status_label), 1.0f);
+    gtk_box_append (GTK_BOX (status_bar_box), state->status_label);
+    gtk_box_append (GTK_BOX (doc_content_vbox), status_bar_box);
 
     /* --- Pestaña 3: Resultados --- */
     GtkWidget *results_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
@@ -1637,6 +2487,11 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_margin_top (state->results_list, 40);
     gtk_widget_set_margin_bottom (state->results_list, 40);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_content_scroll), state->results_list);
+
+    /* ── Global key shortcuts ── */
+    GtkEventController *window_keys = gtk_event_controller_key_new ();
+    gtk_widget_add_controller (window, window_keys);
+    g_signal_connect (window_keys, "key-pressed", G_CALLBACK (on_key_pressed), state);
 
     gtk_window_present(GTK_WINDOW(window));
 }
