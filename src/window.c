@@ -2037,7 +2037,7 @@ on_about_action (GtkButton *button, gpointer user_data)
     CualiAppState *state = (CualiAppState *)user_data;
     adw_show_about_dialog (state->window,
                           "application-name", "Cuali",
-                          "application-icon", "org.gnome.TextEditor-symbolic",
+                          "application-icon", "org.cuali.CualiGTK",
                           "version", "0.1.0",
                           "comments", "Herramienta de análisis cualitativo",
                           "developer-name", "Diego Veraniego",
@@ -2095,7 +2095,7 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_valign (welcome_content, GTK_ALIGN_CENTER);
     adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (welcome_view), welcome_content);
 
-    GtkWidget *logo = gtk_image_new_from_icon_name ("org.gnome.TextEditor-symbolic");
+    GtkWidget *logo = gtk_image_new_from_icon_name ("org.cuali.CualiGTK");
     gtk_image_set_pixel_size (GTK_IMAGE (logo), 128);
     gtk_box_append (GTK_BOX (welcome_content), logo);
 

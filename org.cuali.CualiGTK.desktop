@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Cuali
+Comment=Herramienta de análisis cualitativo
+Exec=cuali-gtk
+Icon=org.cuali.CualiGTK
+Terminal=false
+Type=Application
+Categories=Office;Research;Science;
+StartupNotify=true

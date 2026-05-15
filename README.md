@@ -1,5 +1,9 @@
 # Cuali
 
+<p align="center">
+  <img src="icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg" alt="Cuali" width="128"/>
+</p>
+
 Cuali es una herramienta nativa para el análisis cualitativo de datos, inspirada en Taguette pero construida con C y GTK4/Libadwaita para ofrecer una experiencia rápida, ligera y perfectamente integrada en el escritorio Linux.
 
 ## Características
