@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Cuali
+GenericName=Qualitative Analysis Tool
+Comment=Native qualitative data analysis tool
+Exec=cuali-gtk
+Icon=org.cuali.CualiGTK
+Terminal=false
+Type=Application
+Categories=Office;Education;
+StartupNotify=true

@@ -74,6 +74,9 @@ sudo dnf install gtk4-devel libadwaita-devel sqlite-devel poppler-glib-devel
 sudo pacman -S gtk4 libadwaita sqlite poppler-glib
 ```
 
+**Windows / macOS (En prueba):**
+Ya están disponibles versiones experimentales para pruebas. Puedes descargar los últimos instaladores desde la página de [Releases](https://github.com/diegoveraniego/cuali-gtk/releases).
+
 ## Compilación y Uso
 
 Construir Cuali es sencillo. Clona el repositorio y ejecuta:

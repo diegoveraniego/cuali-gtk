@@ -469,6 +469,55 @@ bool db_tag_delete(int tag_id) {
     return success;
 }
 
+bool db_project_clear_tags(int project_id) {
+    if (!db) return false;
+    sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
+
+    sqlite3_stmt *stmt;
+    
+    const char *sql_ht = "DELETE FROM highlight_tags WHERE tag_id IN (SELECT id FROM tags WHERE project_id = ?);";
+    if (sqlite3_prepare_v2(db, sql_ht, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, project_id);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    
+    const char *sql_h = "DELETE FROM highlights WHERE document_id IN (SELECT id FROM documents WHERE project_id = ?);";
+    if (sqlite3_prepare_v2(db, sql_h, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, project_id);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+
+    const char *sql_t = "DELETE FROM tags WHERE project_id = ?;";
+    if (sqlite3_prepare_v2(db, sql_t, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, project_id);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    
+    sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL);
+    return true;
+}
+
+bool db_project_clear_data(int project_id) {
+    if (!db) return false;
+    db_project_clear_tags(project_id);
+    
+    sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
+    sqlite3_stmt *stmt;
+    
+    const char *sql_d = "DELETE FROM documents WHERE project_id = ?;";
+    if (sqlite3_prepare_v2(db, sql_d, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, project_id);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    
+    sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL);
+    return true;
+}
+
 sqlite3_stmt* db_highlights_get_for_document(int document_id) {
     sqlite3_stmt *stmt;
     const char *sql = "SELECT start_offset, end_offset, id FROM highlights WHERE document_id = ?;";
@@ -497,7 +546,7 @@ sqlite3_stmt* db_tags_get_for_highlight(int highlight_id) {
 sqlite3_stmt* db_results_get_all(int project_id) {
     sqlite3_stmt *stmt;
     const char *sql = 
-        "SELECT h.snippet, d.name, GROUP_CONCAT(t.path, ', ') as tags FROM highlights h "
+        "SELECT h.snippet, d.name, GROUP_CONCAT(t.path || '|||' || COALESCE(t.color, '#77767b'), '@@@') as tags FROM highlights h "
         "JOIN documents d ON h.document_id = d.id "
         "JOIN highlight_tags ht ON h.id = ht.highlight_id "
         "JOIN tags t ON ht.tag_id = t.id "

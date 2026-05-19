@@ -396,6 +396,21 @@ on_tag_edit_save_clicked (GtkButton *btn, gpointer user_data)
 }
 
 static void
+on_tag_edit_delete_clicked (GtkButton *btn, gpointer user_data)
+{
+    gpointer *args = (gpointer *)user_data;
+    CualiAppState *state = (CualiAppState *)args[0];
+    int tag_id = GPOINTER_TO_INT (args[1]);
+    GtkWidget *dialog = GTK_WIDGET (args[2]);
+
+    if (db_tag_delete (tag_id)) {
+        refresh_tags (state);
+        refresh_results (state);
+    }
+    adw_dialog_close (ADW_DIALOG (dialog));
+}
+
+static void
 show_tag_edit_dialog (CualiAppState *state, int tag_id)
 {
     char *cur_path = NULL, *cur_desc = NULL, *cur_color = NULL;
@@ -447,12 +462,30 @@ show_tag_edit_dialog (CualiAppState *state, int tag_id)
     gtk_widget_set_halign (color_box, GTK_ALIGN_START);
     gtk_box_append (GTK_BOX (content_box), color_box);
 
+    GtkWidget *action_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(action_box, GTK_ALIGN_END);
+
+    GtkWidget *delete_btn = gtk_button_new_with_label ("Delete");
+    gtk_widget_add_css_class (delete_btn, "destructive-action");
+    gtk_widget_add_css_class (delete_btn, "pill");
+    gtk_widget_set_tooltip_text (delete_btn, "Delete this tag");
+    gtk_box_append (GTK_BOX (action_box), delete_btn);
+
     GtkWidget *save_btn = gtk_button_new_with_label ("Save");
     gtk_widget_add_css_class (save_btn, "suggested-action");
     gtk_widget_add_css_class (save_btn, "pill");
-    gtk_widget_set_halign (save_btn, GTK_ALIGN_END);
     gtk_widget_set_tooltip_text (save_btn, "Save tag information");
-    gtk_box_append (GTK_BOX (content_box), save_btn);
+    gtk_box_append (GTK_BOX (action_box), save_btn);
+
+    gtk_box_append (GTK_BOX (content_box), action_box);
+
+    gpointer *del_args = g_new (gpointer, 3);
+    del_args[0] = state;
+    del_args[1] = GINT_TO_POINTER (tag_id);
+    del_args[2] = dialog;
+    g_signal_connect_data (delete_btn, "clicked",
+                           G_CALLBACK (on_tag_edit_delete_clicked),
+                           del_args, (GClosureNotify)g_free, 0);
 
     gpointer *args = g_new (gpointer, 6);
     args[0] = state;
@@ -1769,6 +1802,74 @@ on_sidebar_new_tag_activated (GtkEntry *entry, gpointer user_data)
 }
 
 static void
+flatten_tag_tree (TagNode *n, int depth, GtkListBox *list, CualiAppState *state)
+{
+    if (n->name) {
+        bool is_leaf = (n->tag_id > 0);
+        
+        GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_widget_set_margin_start (box, 12 + (depth * 20));
+        gtk_widget_set_margin_end (box, 12);
+        gtk_widget_set_margin_top (box, depth == 0 ? 10 : 6);
+        gtk_widget_set_margin_bottom (box, depth == 0 ? 6 : 6);
+
+        GtkWidget *dot = create_colored_dot (n->color, depth == 0 ? 8 : 10);
+        gtk_box_append (GTK_BOX (box), dot);
+
+        GtkWidget *label = gtk_label_new (n->name);
+        gtk_widget_set_hexpand (label, TRUE);
+        gtk_widget_set_halign (label, GTK_ALIGN_START);
+        gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+        if (depth == 0)
+            gtk_widget_add_css_class (label, "heading");
+        else
+            gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
+        gtk_box_append (GTK_BOX (box), label);
+
+        if (is_leaf && n->count > 0) {
+            char *cs = g_strdup_printf ("%d", n->count);
+            GtkWidget *cl = gtk_label_new (cs);
+            gtk_widget_add_css_class (cl, "numeric");
+            gtk_widget_add_css_class (cl, "dim-label");
+            gtk_box_append (GTK_BOX (box), cl);
+            g_free (cs);
+        }
+
+        if (is_leaf) {
+            GtkWidget *eb = gtk_button_new_from_icon_name ("document-edit-symbolic");
+            gtk_widget_add_css_class (eb, "flat");
+            gtk_widget_set_valign (eb, GTK_ALIGN_CENTER);
+            gtk_widget_set_tooltip_text (eb, "Edit tag");
+            gpointer *args = g_new (gpointer, 2);
+            args[0] = state; args[1] = GINT_TO_POINTER (n->tag_id);
+            g_signal_connect_data (eb, "clicked", G_CALLBACK (on_tag_edit_btn_clicked),
+                                   args, (GClosureNotify) g_free, 0);
+            gtk_box_append (GTK_BOX (box), eb);
+        }
+
+        if (depth > 0 || !is_leaf) {
+            GtkWidget *arrow = gtk_image_new_from_icon_name (is_leaf ? NULL : "go-next-symbolic");
+            if (!is_leaf) {
+                gtk_widget_set_valign (arrow, GTK_ALIGN_CENTER);
+                gtk_widget_set_opacity (arrow, 0.4);
+                gtk_box_append (GTK_BOX (box), arrow);
+            }
+        }
+
+        GtkListBoxRow *row = GTK_LIST_BOX_ROW (gtk_list_box_row_new ());
+        gtk_list_box_row_set_selectable (row, is_leaf);
+        gtk_list_box_row_set_child (row, box);
+        if (is_leaf)
+            g_object_set_data (G_OBJECT (row), "tag-id", GINT_TO_POINTER (n->tag_id));
+        gtk_list_box_append (list, GTK_WIDGET (row));
+    }
+
+    for (GList *l = n->children; l; l = l->next) {
+        flatten_tag_tree ((TagNode *)l->data, n->name ? depth + 1 : 0, list, state);
+    }
+}
+
+static void
 refresh_tags (CualiAppState *state)
 {
     if (!state->tag_list) return;
@@ -1813,95 +1914,7 @@ refresh_tags (CualiAppState *state)
     sqlite3_finalize (stmt);
 
     /* Flatten tree into list box rows via recursive helper */
-    typedef struct { TagNode *node; GtkListBox *list; CualiAppState *state; int depth; } FlattenCtx;
-
-    GList *queue = NULL;
-    /* Start with root's children */
-    for (GList *l = root.children; l; l = l->next) {
-        FlattenCtx *ctx = g_new (FlattenCtx, 1);
-        ctx->node = (TagNode *)l->data;
-        ctx->list = GTK_LIST_BOX (state->tag_list);
-        ctx->state = state;
-        ctx->depth = 0;
-        queue = g_list_append (queue, ctx);
-    }
-
-    while (queue) {
-        FlattenCtx *ctx = (FlattenCtx *)queue->data;
-        queue = g_list_delete_link (queue, queue);
-        TagNode *n = ctx->node;
-        bool is_leaf = (n->tag_id > 0);
-        int depth = ctx->depth;
-
-        GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
-        gtk_widget_set_margin_start (box, 12 + (depth * 20));
-        gtk_widget_set_margin_end (box, 12);
-        gtk_widget_set_margin_top (box, depth == 0 ? 10 : 6);
-        gtk_widget_set_margin_bottom (box, depth == 0 ? 6 : 6);
-
-        GtkWidget *dot = create_colored_dot (n->color, depth == 0 ? 8 : 10);
-        gtk_box_append (GTK_BOX (box), dot);
-
-        GtkWidget *label = gtk_label_new (n->name);
-        gtk_widget_set_hexpand (label, TRUE);
-        gtk_widget_set_halign (label, GTK_ALIGN_START);
-        gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
-        if (depth == 0)
-            gtk_widget_add_css_class (label, "heading");
-        else
-            gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
-        gtk_box_append (GTK_BOX (box), label);
-
-        if (is_leaf && n->count > 0) {
-            char *cs = g_strdup_printf ("%d", n->count);
-            GtkWidget *cl = gtk_label_new (cs);
-            gtk_widget_add_css_class (cl, "numeric");
-            gtk_widget_add_css_class (cl, "dim-label");
-            gtk_box_append (GTK_BOX (box), cl);
-            g_free (cs);
-        }
-
-        if (is_leaf) {
-            GtkWidget *eb = gtk_button_new_from_icon_name ("document-edit-symbolic");
-            gtk_widget_add_css_class (eb, "flat");
-            gtk_widget_set_valign (eb, GTK_ALIGN_CENTER);
-            gtk_widget_set_tooltip_text (eb, "Edit tag");
-            gpointer *args = g_new (gpointer, 2);
-            args[0] = ctx->state; args[1] = GINT_TO_POINTER (n->tag_id);
-            g_signal_connect_data (eb, "clicked", G_CALLBACK (on_tag_edit_btn_clicked),
-                                   args, (GClosureNotify) g_free, 0);
-            gtk_box_append (GTK_BOX (box), eb);
-        }
-
-        if (depth > 0 || !is_leaf) {
-            GtkWidget *arrow = gtk_image_new_from_icon_name (is_leaf ? NULL : "go-next-symbolic");
-            if (!is_leaf) {
-                gtk_widget_set_valign (arrow, GTK_ALIGN_CENTER);
-                gtk_widget_set_opacity (arrow, 0.4);
-                gtk_box_append (GTK_BOX (box), arrow);
-            }
-        }
-
-        GtkListBoxRow *row = GTK_LIST_BOX_ROW (gtk_list_box_row_new ());
-        gtk_list_box_row_set_selectable (row, is_leaf);
-        gtk_list_box_row_set_child (row, box);
-        if (is_leaf)
-            g_object_set_data (G_OBJECT (row), "tag-id", GINT_TO_POINTER (n->tag_id));
-        gtk_list_box_append (ctx->list, GTK_WIDGET (row));
-        g_free (ctx);
-
-        /* Enqueue children */
-        if (n->children) {
-            for (GList *l = n->children; l; l = l->next) {
-                FlattenCtx *c = g_new (FlattenCtx, 1);
-                c->node = (TagNode *)l->data;
-                c->list = GTK_LIST_BOX (state->tag_list);
-                c->state = state;
-                c->depth = depth + 1;
-                queue = g_list_append (queue, c);
-            }
-        }
-    }
+    flatten_tag_tree (&root, 0, GTK_LIST_BOX (state->tag_list), state);
 
     g_list_free_full (root.children, (GDestroyNotify) tag_node_free);
 }
@@ -1942,11 +1955,24 @@ refresh_results (CualiAppState *state)
       gtk_box_append (GTK_BOX (card), meta_box);
       
       if (tags_str) {
-        char **tags = g_strsplit (tags_str, ", ", -1);
+        char **tags = g_strsplit (tags_str, "@@@", -1);
         for (int i = 0; tags[i]; i++) {
-            GtkWidget *tag_badge = gtk_label_new (tags[i]);
-            gtk_widget_add_css_class (tag_badge, "tag-badge");
-            gtk_box_append (GTK_BOX (meta_box), tag_badge);
+            char **parts = g_strsplit (tags[i], "|||", 2);
+            if (parts[0] && parts[1]) {
+                GtkWidget *tag_badge = gtk_label_new (parts[0]);
+                gtk_widget_add_css_class (tag_badge, "tag-badge");
+                
+                char *css = g_strdup_printf("label { background-color: %s; color: white; border: none; }", parts[1]);
+                GtkCssProvider *p = gtk_css_provider_new();
+                gtk_css_provider_load_from_string(p, css);
+                gtk_style_context_add_provider(gtk_widget_get_style_context(tag_badge),
+                                               GTK_STYLE_PROVIDER(p),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+                g_free(css);
+
+                gtk_box_append (GTK_BOX (meta_box), tag_badge);
+            }
+            g_strfreev(parts);
         }
         g_strfreev (tags);
       }
@@ -2302,6 +2328,31 @@ on_highlight_button_clicked (GtkButton *button, gpointer user_data)
   create_highlight_and_show_tags (state);
 }
 
+static void
+on_clear_tags_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->current_project_id > 0) {
+        db_project_clear_tags(state->current_project_id);
+        refresh_all(state);
+        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(buffer, &start, &end);
+        gtk_text_buffer_remove_tag_by_name(buffer, "highlight", &start, &end);
+    }
+}
+
+static void
+on_clear_project_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->current_project_id > 0) {
+        db_project_clear_data(state->current_project_id);
+        state->current_document_id = -1;
+        gtk_text_buffer_set_text (gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view)), "", -1);
+        refresh_all(state);
+    }
+}
 
 
 static void
@@ -2509,9 +2560,24 @@ void window_init(GtkApplication *app) {
 
     GtkWidget *about_item = gtk_button_new_with_label ("About Cuali");
     gtk_widget_set_halign (about_item, GTK_ALIGN_START);
+    gtk_widget_add_css_class(about_item, "flat");
     gtk_widget_set_tooltip_text (about_item, "View application information");
     g_signal_connect (about_item, "clicked", G_CALLBACK (on_about_clicked), state);
     gtk_box_append (GTK_BOX (menu_box), about_item);
+
+    GtkWidget *clear_tags_item = gtk_button_new_with_label ("Clear all highlights & tags");
+    gtk_widget_set_halign (clear_tags_item, GTK_ALIGN_START);
+    gtk_widget_add_css_class(clear_tags_item, "destructive-action");
+    gtk_widget_add_css_class(clear_tags_item, "flat");
+    g_signal_connect (clear_tags_item, "clicked", G_CALLBACK (on_clear_tags_clicked), state);
+    gtk_box_append (GTK_BOX (menu_box), clear_tags_item);
+
+    GtkWidget *clear_proj_item = gtk_button_new_with_label ("Clear project completely");
+    gtk_widget_set_halign (clear_proj_item, GTK_ALIGN_START);
+    gtk_widget_add_css_class(clear_proj_item, "destructive-action");
+    gtk_widget_add_css_class(clear_proj_item, "flat");
+    g_signal_connect (clear_proj_item, "clicked", G_CALLBACK (on_clear_project_clicked), state);
+    gtk_box_append (GTK_BOX (menu_box), clear_proj_item);
 
     gtk_popover_set_child (GTK_POPOVER (menu_popover), menu_box);
     gtk_menu_button_set_popover (GTK_MENU_BUTTON (menu_btn), menu_popover);

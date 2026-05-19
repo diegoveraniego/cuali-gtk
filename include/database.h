@@ -12,6 +12,8 @@ bool db_project_add(const char *name, const char *description);
 int db_project_get_first_id(void);
 bool db_project_get_info(int project_id, char **name, char **description);
 bool db_project_update_info(int project_id, const char *name, const char *description);
+bool db_project_clear_data(int project_id);
+bool db_project_clear_tags(int project_id);
 
 int db_document_add(int project_id, const char *name, const char *contents);
 bool db_document_update_contents(int document_id, const char *contents);
