@@ -2368,6 +2368,7 @@ void window_init(GtkApplication *app) {
     gtk_style_context_add_provider_for_display (gdk_display_get_default (),
                                                GTK_STYLE_PROVIDER (provider),
                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref (provider);
 
     GtkWidget *window = adw_application_window_new(app);
     state->window = window;
@@ -2387,21 +2388,13 @@ void window_init(GtkApplication *app) {
     GtkWidget *welcome_header = adw_header_bar_new ();
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (welcome_view), welcome_header);
 
-    GtkWidget *welcome_content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 20);
-    gtk_widget_set_halign (welcome_content, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign (welcome_content, GTK_ALIGN_CENTER);
-    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (welcome_view), welcome_content);
-
-    GtkWidget *logo = gtk_image_new_from_icon_name ("org.cuali.CualiGTK");
-    gtk_image_set_pixel_size (GTK_IMAGE (logo), 128);
-    gtk_box_append (GTK_BOX (welcome_content), logo);
-
-    GtkWidget *title = gtk_label_new ("Welcome to Cuali");
-    gtk_widget_add_css_class (title, "title-1");
-    gtk_box_append (GTK_BOX (welcome_content), title);
+    GtkWidget *status_page = adw_status_page_new ();
+    adw_status_page_set_title (ADW_STATUS_PAGE (status_page), "Welcome to Cuali");
+    adw_status_page_set_icon_name (ADW_STATUS_PAGE (status_page), "org.cuali.CualiGTK");
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (welcome_view), status_page);
 
     GtkWidget *btns_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
-    gtk_box_append (GTK_BOX (welcome_content), btns_box);
+    adw_status_page_set_child (ADW_STATUS_PAGE (status_page), btns_box);
 
     GtkWidget *open_btn = gtk_button_new_with_label ("Open existing project");
     gtk_widget_add_css_class (open_btn, "suggested-action");
@@ -2416,7 +2409,7 @@ void window_init(GtkApplication *app) {
 
     GtkWidget *recent_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_margin_top (recent_box, 30);
-    gtk_box_append (GTK_BOX (welcome_content), recent_box);
+    gtk_box_append (GTK_BOX (btns_box), recent_box);
     
     GtkWidget *recent_label = gtk_label_new ("Recent projects");
     gtk_widget_add_css_class (recent_label, "sidebar-title");
@@ -2449,7 +2442,7 @@ void window_init(GtkApplication *app) {
     
     GtkWidget *back_btn = gtk_button_new_from_icon_name ("go-previous-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), back_btn);
-    g_signal_connect_data(back_btn, "clicked", G_CALLBACK(adw_view_stack_set_visible_child_name), g_strdup("welcome"), (GClosureNotify)g_free, G_CONNECT_SWAPPED);
+    g_signal_connect_swapped (back_btn, "clicked", G_CALLBACK (adw_view_stack_set_visible_child_name), state->root_stack);
     g_signal_connect_swapped (back_btn, "clicked", G_CALLBACK (populate_recent_list), state);
 
     GtkWidget *open_button = gtk_button_new_from_icon_name ("folder-open-symbolic");
