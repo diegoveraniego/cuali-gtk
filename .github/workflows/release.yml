@@ -1,0 +1,145 @@
+name: Build Releases
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libgtk-4-dev libadwaita-1-dev libsqlite3-dev libpoppler-glib-dev
+
+      - name: Build binary
+        run: make
+
+      - name: Build AppImage
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          ./linuxdeploy-x86_64.AppImage --appimage-extract
+          rm squashfs-root/usr/bin/strip
+          ln -s /usr/bin/strip squashfs-root/usr/bin/strip
+          mkdir -p AppDir/usr/{bin,share/{applications,icons/hicolor/scalable/apps}}
+          cp cuali-gtk AppDir/usr/bin/
+          cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg AppDir/usr/share/icons/hicolor/scalable/apps/
+          cp org.cuali.CualiGTK.desktop AppDir/usr/share/applications/
+          ./squashfs-root/AppRun --appdir AppDir -d AppDir/usr/share/applications/org.cuali.CualiGTK.desktop -i AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg --output appimage
+          mv Cuali*.AppImage Cuali-x86_64.AppImage
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Cuali-x86_64.AppImage
+
+  build-windows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-compiler
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-mingw-w64-x86-64 mingw-w64-tools
+
+      - name: Setup MSYS2 environment
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-libadwaita
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-poppler
+            make
+
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          make CC=/c/msys64/mingw64/bin/x86_64-w64-mingw32-gcc PKG_CONFIG=/c/msys64/mingw64/bin/x86_64-w64-mingw32-pkg-config
+          mkdir -p dist
+          cp cuali-gtk.exe dist/
+          cp /c/msys64/mingw64/bin/libgtk-4-0.dll dist/
+          cp /c/msys64/mingw64/bin/libadwaita-1-0.dll dist/
+          cp /c/msys64/mingw64/bin/libglib-2.0-0.dll dist/
+          cp /c/msys64/mingw64/bin/libgobject-2.0-0.dll dist/
+          cp /c/msys64/mingw64/bin/libgio-2.0-0.dll dist/
+          cp /c/msys64/mingw64/bin/libpango-1.0-0.dll dist/
+          cp /c/msys64/mingw64/bin/libpangocairo-1.0-0.dll dist/
+          cp /c/msys64/mingw64/bin/libcairo-2.dll dist/
+          cp /c/msys64/mingw64/bin/libsqlite3-0.dll dist/
+          cp /c/msys64/mingw64/bin/libpoppler-glib-8.dll dist/
+          cp /c/msys64/mingw64/bin/libgraphene-1.0-0.dll dist/
+          cp /c/msys64/mingw64/bin/libgdk_pixbuf-2.0-0.dll dist/
+          cp /c/msys64/mingw64/bin/libharfbuzz-0.dll dist/
+          cp /c/msys64/mingw64/bin/libfreetype-6.dll dist/
+          cp /c/msys64/mingw64/bin/libfontconfig-1.dll dist/
+          cp /c/msys64/mingw64/bin/libintl-8.dll dist/
+          cp /c/msys64/mingw64/bin/libiconv-2.dll dist/
+          cp /c/msys64/mingw64/bin/libz-1.dll dist/
+          cp /c/msys64/mingw64/bin/libpng16-16.dll dist/
+
+      - name: Create zip
+        run: cd dist && zip ../Cuali-windows.zip *
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Cuali-windows.zip
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install gtk4 libadwaita sqlite poppler pkg-config
+
+      - name: Build
+        run: |
+          make
+          mkdir -p Cuali.app/Contents/{MacOS,Resources}
+          cp cuali-gtk Cuali.app/Contents/MacOS/
+          cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg Cuali.app/Contents/Resources/
+          cat > Cuali.app/Contents/Info.plist << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>Cuali</string>
+            <key>CFBundleDisplayName</key>
+            <string>Cuali</string>
+            <key>CFBundleIdentifier</key>
+            <string>org.cuali.CualiGTK</string>
+            <key>CFBundleVersion</key>
+            <string>0.1.0</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.1.0</string>
+            <key>CFBundleExecutable</key>
+            <string>cuali-gtk</string>
+            <key>CFBundleIconFile</key>
+            <string>org.cuali.CualiGTK</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+          </dict>
+          </plist>
+          PLIST
+          tar -czf Cuali-macos.tar.gz Cuali.app
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Cuali-macos.tar.gz
