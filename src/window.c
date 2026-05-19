@@ -483,13 +483,52 @@ on_tag_edit_btn_clicked (GtkButton *btn, gpointer user_data)
     show_tag_edit_dialog (state, tag_id);
 }
 
+static void on_unified_dialog_closed (AdwDialog *dialog, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    int hl_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "hl-id"));
+    GtkTextView *memo_view = GTK_TEXT_VIEW(g_object_get_data(G_OBJECT(dialog), "memo-view"));
+
+    if (hl_id > 0 && memo_view) {
+        GtkTextBuffer *buf = gtk_text_view_get_buffer(memo_view);
+        GtkTextIter s, e;
+        gtk_text_buffer_get_bounds(buf, &s, &e);
+        char *memo = gtk_text_buffer_get_text(buf, &s, &e, FALSE);
+        db_highlight_set_memo(hl_id, memo ? memo : "");
+        g_free(memo);
+    }
+    
+    gtk_widget_grab_focus (state->text_view);
+}
+
+static void on_unified_delete_clicked (GtkButton *btn, gpointer user_data)
+{
+    GtkWidget *dialog = GTK_WIDGET(user_data);
+    CualiAppState *state = (CualiAppState *)g_object_get_data(G_OBJECT(dialog), "app-state");
+    int hl_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "hl-id"));
+    
+    if (hl_id > 0) {
+        db_highlight_delete(hl_id);
+    }
+    adw_dialog_force_close(ADW_DIALOG(dialog));
+    
+    GtkListBoxRow *row = gtk_list_box_get_selected_row(GTK_LIST_BOX(state->doc_list));
+    if (row) {
+        const char *name = g_object_get_data(G_OBJECT(row), "doc-name");
+        const char *contents = g_object_get_data(G_OBJECT(row), "doc-contents");
+        load_document(state, state->current_document_id, name, contents);
+    }
+    refresh_results(state);
+    refresh_tags(state);
+}
+
 static void
 show_tag_dialog (CualiAppState *state, int highlight_id)
 {
     GtkWidget *dialog = GTK_WIDGET (adw_dialog_new ());
     adw_dialog_set_title (ADW_DIALOG (dialog), "Tags");
     adw_dialog_set_content_width (ADW_DIALOG (dialog), 400);
-    adw_dialog_set_content_height (ADW_DIALOG (dialog), 500);
+    adw_dialog_set_content_height (ADW_DIALOG (dialog), 550);
 
     GtkWidget *toolbar_view = adw_toolbar_view_new ();
     GtkWidget *header_bar = adw_header_bar_new ();
@@ -509,17 +548,51 @@ show_tag_dialog (CualiAppState *state, int highlight_id)
     gtk_widget_set_vexpand (scroll, TRUE);
     gtk_box_append (GTK_BOX (content_box), scroll);
 
-    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), content_box);
-    
     GtkWidget *list_box = gtk_list_box_new ();
     gtk_widget_add_css_class (list_box, "boxed-list");
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), list_box);
+
+    /* Memo */
+    gtk_box_append(GTK_BOX(content_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    GtkWidget *memo_label = gtk_label_new("Researcher memo");
+    gtk_widget_add_css_class(memo_label, "sidebar-title");
+    gtk_widget_set_halign(memo_label, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(content_box), memo_label);
+
+    GtkWidget *memo_scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 80);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 160);
+    
+    GtkWidget *memo_view = gtk_text_view_new();
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(memo_view), GTK_WRAP_WORD_CHAR);
+    char *memo_text = NULL;
+    if (highlight_id > 0) db_highlight_get_memo(highlight_id, &memo_text);
+    if (memo_text) {
+        gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(memo_view)), memo_text, -1);
+        g_free(memo_text);
+    }
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(memo_scroll), memo_view);
+    gtk_box_append(GTK_BOX(content_box), memo_scroll);
+
+    /* Delete Button */
+    gtk_box_append(GTK_BOX(content_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    GtkWidget *del_btn = gtk_button_new_with_label("Delete highlight");
+    gtk_widget_add_css_class(del_btn, "destructive-action");
+    gtk_box_append(GTK_BOX(content_box), del_btn);
+    g_signal_connect(del_btn, "clicked", G_CALLBACK(on_unified_delete_clicked), dialog);
+
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), content_box);
 
     g_object_set_data (G_OBJECT (tag_entry), "highlight_id", GINT_TO_POINTER (highlight_id));
     g_object_set_data (G_OBJECT (tag_entry), "list_box", list_box);
     g_signal_connect (tag_entry, "activate", G_CALLBACK (on_dialog_new_tag_activated), state);
 
     populate_tag_dialog_list (state, highlight_id, list_box);
+
+    g_object_set_data (G_OBJECT (dialog), "app-state", state);
+    g_object_set_data (G_OBJECT (dialog), "hl-id", GINT_TO_POINTER (highlight_id));
+    g_object_set_data (G_OBJECT (dialog), "memo-view", memo_view);
+    g_signal_connect (dialog, "closed", G_CALLBACK (on_unified_dialog_closed), state);
 
     adw_dialog_set_child (ADW_DIALOG (dialog), toolbar_view);
     adw_dialog_present (ADW_DIALOG (dialog), state->window);
@@ -531,7 +604,7 @@ static void on_popover_delete_clicked(GtkButton *btn, gpointer user_data)
     if (state->active_highlight_id <= 0) return;
     
     db_highlight_delete(state->active_highlight_id);
-    gtk_popover_popdown(GTK_POPOVER(state->highlight_popover));
+    adw_dialog_force_close(ADW_DIALOG(state->highlight_popover));
     
     GtkListBoxRow *row = gtk_list_box_get_selected_row(GTK_LIST_BOX(state->doc_list));
     if (row) {
@@ -637,7 +710,7 @@ static void populate_popover_tags(CualiAppState *state)
     if (assigned_ids) g_hash_table_destroy(assigned_ids);
 }
 
-static void on_popover_closed (GtkPopover *popover, gpointer user_data)
+static void on_highlight_dialog_closed (AdwDialog *dialog, gpointer user_data)
 {
     CualiAppState *state = (CualiAppState *)user_data;
     
@@ -682,7 +755,7 @@ static void on_popover_closed (GtkPopover *popover, gpointer user_data)
     }
 }
 
-static void show_popover_at(CualiAppState *state, int highlight_id)
+static void show_highlight_dialog_at(CualiAppState *state, int highlight_id)
 {
     state->active_highlight_id = highlight_id;
     populate_popover_tags(state);
@@ -729,33 +802,19 @@ static void show_popover_at(CualiAppState *state, int highlight_id)
 
     if (!bounds_valid) return;
 
-    GdkRectangle rect;
-    GtkTextView *text_view = GTK_TEXT_VIEW(state->text_view);
-    gtk_text_view_get_iter_location(text_view, &end_iter, &rect);
-
-    gtk_text_view_buffer_to_window_coords(text_view,
-        GTK_TEXT_WINDOW_WIDGET, rect.x, rect.y, &rect.x, &rect.y);
-
-    // Bug 2 Fix: Clamp to allocation
-    int width = gtk_widget_get_width(GTK_WIDGET(text_view));
-    if (rect.x < 8) rect.x = 8;
-    if (rect.x > (width - rect.width - 8)) {
-        rect.x = width - rect.width - 8;
-    }
-    
-    gtk_popover_set_pointing_to(GTK_POPOVER(state->highlight_popover), &rect);
-    gtk_popover_popup(GTK_POPOVER(state->highlight_popover));
+    adw_dialog_present(ADW_DIALOG(state->highlight_popover), state->window);
 }
 
-static void build_highlight_popover(CualiAppState *state)
+static void build_highlight_dialog(CualiAppState *state)
 {
-    gtk_popover_set_position(GTK_POPOVER(state->highlight_popover), GTK_POS_BOTTOM);
-    gtk_popover_set_autohide(GTK_POPOVER(state->highlight_popover), TRUE);
-    /* GTK4 auto-flips position when popover would go off-screen */
-    gtk_popover_set_has_arrow(GTK_POPOVER(state->highlight_popover), TRUE);
+    adw_dialog_set_title(ADW_DIALOG(state->highlight_popover), "Highlight");
+    adw_dialog_set_content_width(ADW_DIALOG(state->highlight_popover), 360);
+
+    GtkWidget *toolbar_view = adw_toolbar_view_new();
+    GtkWidget *header_bar = adw_header_bar_new();
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view), header_bar);
 
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_size_request(box, 260, -1);  /* min width */
     
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 300);
@@ -808,9 +867,10 @@ static void build_highlight_popover(CualiAppState *state)
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(memo_scroll), state->popover_memo_view);
     gtk_box_append(GTK_BOX(box), memo_scroll);
 
-    gtk_popover_set_child(GTK_POPOVER(state->highlight_popover), box);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), box);
+    adw_dialog_set_child(ADW_DIALOG(state->highlight_popover), toolbar_view);
     g_signal_connect(state->highlight_popover, "closed",
-                     G_CALLBACK(on_popover_closed), state);
+                     G_CALLBACK(on_highlight_dialog_closed), state);
 }
 
 static void
@@ -820,17 +880,18 @@ on_selector_row_activated (GtkListBox *box, GtkListBoxRow *row, gpointer user_da
     if (!row) return;
     
     int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (row), "hl-id"));
-    gtk_popover_popdown (GTK_POPOVER (state->highlight_selector));
+    adw_dialog_force_close (ADW_DIALOG (state->highlight_selector));
     
     if (hl_id > 0) {
-        show_popover_at (state, hl_id);
+        show_highlight_dialog_at (state, hl_id);
     }
 }
 
 static void
-show_highlight_selector (CualiAppState *state, GSList *hl_ids, int x, int y)
+show_highlight_selector_dialog (CualiAppState *state, GSList *hl_ids, int x, int y)
 {
-    GtkWidget *scroll = gtk_popover_get_child (GTK_POPOVER (state->highlight_selector));
+    GtkWidget *toolbar_view = adw_dialog_get_child (ADW_DIALOG (state->highlight_selector));
+    GtkWidget *scroll = adw_toolbar_view_get_content (ADW_TOOLBAR_VIEW (toolbar_view));
     if (!GTK_IS_SCROLLED_WINDOW (scroll)) return;
     GtkWidget *list = gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (scroll));
     if (!GTK_IS_LIST_BOX (list)) return;
@@ -889,21 +950,19 @@ show_highlight_selector (CualiAppState *state, GSList *hl_ids, int x, int y)
         g_free (tag_color);
     }
     
-    GdkRectangle rect = { x - 8, y - 8, 16, 16 };
-    gtk_popover_set_pointing_to (GTK_POPOVER (state->highlight_selector), &rect);
-    gtk_popover_popup (GTK_POPOVER (state->highlight_selector));
+    adw_dialog_present (ADW_DIALOG (state->highlight_selector), state->window);
 }
 
 static void
-build_highlight_selector (CualiAppState *state)
+build_highlight_selector_dialog (CualiAppState *state)
 {
-    state->highlight_selector = gtk_popover_new ();
-    gtk_widget_set_parent (state->highlight_selector, state->text_view);
-    gtk_popover_set_position (GTK_POPOVER (state->highlight_selector), GTK_POS_BOTTOM);
-    gtk_popover_set_autohide (GTK_POPOVER (state->highlight_selector), TRUE);
-    gtk_popover_set_has_arrow (GTK_POPOVER (state->highlight_selector), TRUE);
-    gtk_widget_set_size_request (state->highlight_selector, 280, -1);
-    
+    adw_dialog_set_title (ADW_DIALOG (state->highlight_selector), "Select Highlight");
+    adw_dialog_set_content_width (ADW_DIALOG (state->highlight_selector), 300);
+
+    GtkWidget *toolbar_view = adw_toolbar_view_new();
+    GtkWidget *header_bar = adw_header_bar_new();
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view), header_bar);
+
     GtkWidget *scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_max_content_height (GTK_SCROLLED_WINDOW (scroll), 250);
     gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW (scroll), TRUE);
@@ -914,17 +973,22 @@ build_highlight_selector (CualiAppState *state)
     
     g_signal_connect (list, "row-activated", G_CALLBACK (on_selector_row_activated), state);
     
-    gtk_popover_set_child (GTK_POPOVER (state->highlight_selector), scroll);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), scroll);
+    adw_dialog_set_child (ADW_DIALOG (state->highlight_selector), toolbar_view);
 }
 
 static void
 on_text_view_realized (GtkWidget *widget, gpointer user_data)
 {
-    build_highlight_popover((CualiAppState *)user_data);
-    build_highlight_selector((CualiAppState *)user_data);
+    CualiAppState *state = (CualiAppState *)user_data;
+    state->highlight_popover = GTK_WIDGET(adw_dialog_new());
+    state->highlight_selector = GTK_WIDGET(adw_dialog_new());
+    build_highlight_dialog(state);
+    build_highlight_selector_dialog(state);
 }
 
-static void show_highlight_selector(CualiAppState *state, GSList *hl_ids, int x, int y);
+static void show_highlight_selector_dialog(CualiAppState *state, GSList *hl_ids, int x, int y);
+static void create_highlight_and_show_tags(CualiAppState *state);
 
 static void
 on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
@@ -953,13 +1017,15 @@ on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, double y,
     
     if (count == 0) return;
     
+    gtk_gesture_set_state (GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    
     GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (gtk_widget_get_ancestor (state->text_view, GTK_TYPE_SCROLLED_WINDOW)));
     double scroll_pos = adj ? gtk_adjustment_get_value (adj) : 0;
     
     if (count == 1) {
-        show_popover_at(state, GPOINTER_TO_INT(hl_ids->data));
+        show_tag_dialog(state, GPOINTER_TO_INT(hl_ids->data));
     } else {
-        show_highlight_selector(state, hl_ids, (int)x, (int)y);
+        show_highlight_selector_dialog(state, hl_ids, (int)x, (int)y);
     }
     
     if (adj) {
@@ -1020,7 +1086,7 @@ on_text_view_released (GtkGestureClick *gesture, int n_press, double x, double y
     g_free(text_before_start);
     g_free(text_before_end);
                          
-    show_popover_at(state, -1);
+    create_highlight_and_show_tags(state);
 }
 
 static void
@@ -2608,10 +2674,12 @@ void window_init(GtkApplication *app) {
     g_signal_connect(buffer, "insert-text", G_CALLBACK(on_insert_text), state);
     g_signal_connect(buffer, "delete-range", G_CALLBACK(on_delete_range), state);
     
-    /* Create popover once and parent it */
-    state->highlight_popover = gtk_popover_new();
-    gtk_widget_set_parent(state->highlight_popover, text_view);
-    build_highlight_popover(state);
+    /* Create dialogs once */
+    state->highlight_popover = GTK_WIDGET(adw_dialog_new());
+    build_highlight_dialog(state);
+
+    state->highlight_selector = GTK_WIDGET(adw_dialog_new());
+    build_highlight_selector_dialog(state);
 
     GtkGesture *click_gesture = gtk_gesture_click_new ();
     g_signal_connect (click_gesture, "pressed", G_CALLBACK (on_text_view_clicked), state);

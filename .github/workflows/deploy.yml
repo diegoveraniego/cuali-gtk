@@ -1,0 +1,52 @@
+name: Build AppImage
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libadwaita-1-dev libpoppler-glib-dev libsqlite3-dev build-essential wget file
+
+    - name: Build project
+      run: |
+        make -j$(nproc)
+
+    - name: Prepare AppDir
+      run: |
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/share/applications
+        mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
+        cp cuali-gtk AppDir/usr/bin/
+        cp org.cuali.CualiGTK.desktop AppDir/usr/share/applications/
+        cp assets/icon.svg AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg || true
+
+    - name: Setup linuxdeploy
+      run: |
+        wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+        chmod +x linuxdeploy-x86_64.AppImage
+        wget https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk.sh
+        chmod +x linuxdeploy-plugin-gtk.sh
+
+    - name: Build AppImage
+      run: |
+        export OUTPUT=Cuali-x86_64.AppImage
+        ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin gtk -d AppDir/usr/share/applications/org.cuali.CualiGTK.desktop -i AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg --output appimage
+      env:
+        UPD_INFO: "gh-releases-zsync|your-username|cuali-gtk|latest|*x86_64.AppImage.zsync"
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: Cuali-AppImage
+        path: Cuali-*.AppImage
