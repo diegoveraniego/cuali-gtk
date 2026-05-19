@@ -453,6 +453,7 @@ show_tag_edit_dialog (CualiAppState *state, int tag_id)
     gtk_widget_add_css_class (save_btn, "suggested-action");
     gtk_widget_add_css_class (save_btn, "pill");
     gtk_widget_set_halign (save_btn, GTK_ALIGN_END);
+    gtk_widget_set_tooltip_text (save_btn, "Save tag information");
     gtk_box_append (GTK_BOX (content_box), save_btn);
 
     gpointer *args = g_new (gpointer, 6);
@@ -584,6 +585,7 @@ show_tag_dialog (CualiAppState *state, int highlight_id)
     gtk_box_append(GTK_BOX(content_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     GtkWidget *del_btn = gtk_button_new_with_label("Delete highlight");
     gtk_widget_add_css_class(del_btn, "destructive-action");
+    gtk_widget_set_tooltip_text(del_btn, "Remove this highlight and its metadata");
     gtk_box_append(GTK_BOX(content_box), del_btn);
     g_signal_connect(del_btn, "clicked", G_CALLBACK(on_unified_delete_clicked), dialog);
 
@@ -839,6 +841,7 @@ static void build_highlight_dialog(CualiAppState *state)
     
     state->popover_delete_btn = gtk_button_new_with_label("Delete highlight");
     gtk_widget_add_css_class(state->popover_delete_btn, "destructive-action");
+    gtk_widget_set_tooltip_text(state->popover_delete_btn, "Remove this highlight");
     gtk_widget_set_margin_start(state->popover_delete_btn, 8);
     gtk_widget_set_margin_end(state->popover_delete_btn, 8);
     gtk_widget_set_margin_top(state->popover_delete_btn, 8);
@@ -1553,6 +1556,23 @@ on_window_close_request (GtkWindow *window, gpointer user_data)
 }
 
 static void
+on_about_clicked (GtkButton *button, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    const char *developers[] = { "Diego", NULL };
+    
+    adw_show_about_window (GTK_WINDOW (state->window),
+                          "application-name", "Cuali",
+                          "application-icon", "org.cuali.CualiGTK",
+                          "version", "1.0",
+                          "copyright", "© 2026 Diego",
+                          "license-type", GTK_LICENSE_LGPL_2_1,
+                          "developers", developers,
+                          "website", "https://github.com/diegoveraniego/cuali-gtk",
+                          NULL);
+}
+
+static void
 on_edit_toggle_clicked (GtkButton *button, gpointer user_data)
 {
   CualiAppState *state = (CualiAppState *)user_data;
@@ -2096,6 +2116,7 @@ refresh_documents (CualiAppState *state)
       gtk_widget_add_css_class (delete_btn, "flat");
       gtk_widget_add_css_class (delete_btn, "destructive-action");
       gtk_widget_set_valign (delete_btn, GTK_ALIGN_CENTER);
+      gtk_widget_set_tooltip_text (delete_btn, "Delete this document from project");
       g_object_set_data (G_OBJECT (row), "doc-id", GINT_TO_POINTER (id));
       g_object_set_data (G_OBJECT (row), "app-state", state);
       g_signal_connect (delete_btn, "clicked", G_CALLBACK (on_delete_doc_clicked), row);
@@ -2407,12 +2428,14 @@ void window_init(GtkApplication *app) {
     gtk_widget_add_css_class (open_btn, "suggested-action");
     gtk_widget_add_css_class (open_btn, "pill");
     gtk_widget_set_halign (open_btn, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text (open_btn, "Open an existing .cuali project file");
     g_signal_connect (open_btn, "clicked", G_CALLBACK (on_open_project_clicked), state);
     gtk_box_append (GTK_BOX (btns_box), open_btn);
 
     GtkWidget *new_btn = gtk_button_new_with_label ("Create new project");
     gtk_widget_add_css_class (new_btn, "pill");
     gtk_widget_set_halign (new_btn, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text (new_btn, "Start a new qualitative research project");
     g_signal_connect (new_btn, "clicked", G_CALLBACK (on_new_project_clicked), state);
     gtk_box_append (GTK_BOX (btns_box), new_btn);
 
@@ -2451,15 +2474,18 @@ void window_init(GtkApplication *app) {
     
     GtkWidget *back_btn = gtk_button_new_from_icon_name ("go-previous-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), back_btn);
+    gtk_widget_set_tooltip_text (back_btn, "Go back to welcome screen");
     g_signal_connect_swapped (back_btn, "clicked", G_CALLBACK (adw_view_stack_set_visible_child_name), state->root_stack);
     g_signal_connect_swapped (back_btn, "clicked", G_CALLBACK (populate_recent_list), state);
 
     GtkWidget *open_button = gtk_button_new_from_icon_name ("folder-open-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), open_button);
+    gtk_widget_set_tooltip_text (open_button, "Open another project");
     g_signal_connect (open_button, "clicked", G_CALLBACK (on_open_project_clicked), state);
 
     GtkWidget *add_button = gtk_button_new_from_icon_name ("list-add-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), add_button);
+    gtk_widget_set_tooltip_text (add_button, "Import a new document (PDF or Text)");
     g_signal_connect (add_button, "clicked", G_CALLBACK (on_add_button_clicked), state);
 
     state->view_stack = adw_view_stack_new ();
@@ -2473,16 +2499,19 @@ void window_init(GtkApplication *app) {
 
     GtkWidget *hl_button = gtk_button_new_from_icon_name ("format-text-underline-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), hl_button);
+    gtk_widget_set_tooltip_text (hl_button, "Highlight selected text (Ctrl+B)");
     g_signal_connect (hl_button, "clicked", G_CALLBACK (on_highlight_button_clicked), state);
     
     state->edit_toggle = gtk_button_new_from_icon_name ("document-edit-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), state->edit_toggle);
+    gtk_widget_set_tooltip_text (state->edit_toggle, "Toggle edit mode (Ctrl+E)");
     g_signal_connect (state->edit_toggle, "clicked", G_CALLBACK (on_edit_toggle_clicked), state);
 
     state->save_btn = gtk_button_new_with_label ("Save");
     gtk_widget_add_css_class (state->save_btn, "suggested-action");
     gtk_widget_set_visible (state->save_btn, FALSE);
     gtk_widget_set_sensitive (state->save_btn, FALSE);
+    gtk_widget_set_tooltip_text (state->save_btn, "Save changes to current document (Ctrl+S)");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), state->save_btn);
     g_signal_connect (state->save_btn, "clicked", G_CALLBACK (on_save_clicked), state);
     
@@ -2490,6 +2519,7 @@ void window_init(GtkApplication *app) {
     GtkWidget *menu_btn = gtk_menu_button_new ();
     gtk_widget_add_css_class (menu_btn, "flat");
     gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (menu_btn), "open-menu-symbolic");
+    gtk_widget_set_tooltip_text (menu_btn, "Main menu");
 
     GtkWidget *menu_popover = gtk_popover_new ();
     gtk_popover_set_autohide(GTK_POPOVER(menu_popover), TRUE);
@@ -2497,12 +2527,14 @@ void window_init(GtkApplication *app) {
 
     GtkWidget *import_item = gtk_button_new_with_label ("Import document…");
     gtk_widget_set_halign (import_item, GTK_ALIGN_START);
+    gtk_widget_set_tooltip_text (import_item, "Import a file into the project");
     g_signal_connect (import_item, "clicked", G_CALLBACK (on_add_button_clicked), state);
     gtk_box_append (GTK_BOX (menu_box), import_item);
 
     GtkWidget *about_item = gtk_button_new_with_label ("About Cuali");
     gtk_widget_set_halign (about_item, GTK_ALIGN_START);
-    g_signal_connect (about_item, "clicked", G_CALLBACK (on_about_action), state);
+    gtk_widget_set_tooltip_text (about_item, "View application information");
+    g_signal_connect (about_item, "clicked", G_CALLBACK (on_about_clicked), state);
     gtk_box_append (GTK_BOX (menu_box), about_item);
 
     gtk_popover_set_child (GTK_POPOVER (menu_popover), menu_box);
@@ -2601,18 +2633,20 @@ void window_init(GtkApplication *app) {
     gtk_button_set_child (GTK_BUTTON (doc_toggle_btn), doc_toggle_icon);
     gtk_widget_add_css_class (doc_toggle_btn, "flat");
     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (doc_toggle_btn), TRUE);
-    gtk_widget_set_tooltip_text (doc_toggle_btn, "Show/hide documents");
+    gtk_widget_set_tooltip_text (doc_toggle_btn, "Show/hide documents sidebar");
     gtk_box_append (GTK_BOX (doc_toolbar), doc_toggle_btn);
     g_signal_connect (doc_toggle_btn, "toggled", G_CALLBACK (on_doc_sidebar_toggle), split_view);
 
     GtkWidget *zoom_out_btn = gtk_button_new_from_icon_name ("zoom-out-symbolic");
     gtk_widget_add_css_class (zoom_out_btn, "flat");
     gtk_widget_set_margin_start (zoom_out_btn, 12);
+    gtk_widget_set_tooltip_text (zoom_out_btn, "Zoom out");
     gtk_box_append (GTK_BOX (doc_toolbar), zoom_out_btn);
     g_signal_connect (zoom_out_btn, "clicked", G_CALLBACK (on_zoom_out_clicked), state);
 
     GtkWidget *zoom_in_btn = gtk_button_new_from_icon_name ("zoom-in-symbolic");
     gtk_widget_add_css_class (zoom_in_btn, "flat");
+    gtk_widget_set_tooltip_text (zoom_in_btn, "Zoom in");
     gtk_box_append (GTK_BOX (doc_toolbar), zoom_in_btn);
     g_signal_connect (zoom_in_btn, "clicked", G_CALLBACK (on_zoom_in_clicked), state);
 
@@ -2637,13 +2671,13 @@ void window_init(GtkApplication *app) {
 
     GtkWidget *search_prev = gtk_button_new_from_icon_name ("go-up-symbolic");
     gtk_widget_add_css_class (search_prev, "flat");
-    gtk_widget_set_tooltip_text (search_prev, "Previous (Shift+Enter)");
+    gtk_widget_set_tooltip_text (search_prev, "Previous match (Shift+Enter)");
     g_signal_connect (search_prev, "clicked", G_CALLBACK (on_search_prev_clicked), state);
     gtk_box_append (GTK_BOX (search_box), search_prev);
 
     GtkWidget *search_next = gtk_button_new_from_icon_name ("go-down-symbolic");
     gtk_widget_add_css_class (search_next, "flat");
-    gtk_widget_set_tooltip_text (search_next, "Next (Enter)");
+    gtk_widget_set_tooltip_text (search_next, "Next match (Enter)");
     g_signal_connect (search_next, "clicked", G_CALLBACK (on_search_next_clicked), state);
     gtk_box_append (GTK_BOX (search_box), search_next);
 
@@ -2768,7 +2802,7 @@ void window_init(GtkApplication *app) {
     gtk_button_set_child (GTK_BUTTON (res_toggle_btn), toggle_icon);
     gtk_widget_add_css_class (res_toggle_btn, "flat");
     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (res_toggle_btn), TRUE);
-    gtk_widget_set_tooltip_text (res_toggle_btn, "Show/hide filters");
+    gtk_widget_set_tooltip_text (res_toggle_btn, "Show/hide filters sidebar");
     gtk_box_append (GTK_BOX (res_toolbar), res_toggle_btn);
     g_signal_connect (res_toggle_btn, "toggled",
                       G_CALLBACK (on_res_sidebar_toggle),
