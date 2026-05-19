@@ -2,6 +2,9 @@
 *.o
 cuali-gtk
 
+# AppImage builds
+*.AppImage
+
 # SQLite databases
 *.db
 *.sqlite3

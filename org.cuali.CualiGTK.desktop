@@ -6,5 +6,5 @@ Exec=cuali-gtk
 Icon=org.cuali.CualiGTK
 Terminal=false
 Type=Application
-Categories=Office;Research;Science;
+Categories=Office;Education;
 StartupNotify=true
