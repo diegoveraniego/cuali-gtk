@@ -2352,19 +2352,6 @@ on_open_project_clicked (GtkButton *button, gpointer user_data)
 }
 
 static void
-on_about_action (GtkButton *button, gpointer user_data)
-{
-    CualiAppState *state = (CualiAppState *)user_data;
-    adw_show_about_dialog (state->window,
-                          "application-name", "Cuali",
-                          "application-icon", "org.cuali.CualiGTK",
-                          "version", "0.1.0",
-                          "comments", "Qualitative analysis tool",
-                          "developer-name", "Diego Veraniego",
-                          NULL);
-}
-
-static void
 on_add_button_clicked (GtkButton *button, gpointer user_data)
 {
   CualiAppState *state = (CualiAppState *)user_data;
