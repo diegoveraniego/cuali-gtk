@@ -14,7 +14,8 @@ const char *style_css =
   ".tag-count-badge { background-color: rgba(0,0,0,0.1); border-radius: 12px; padding: 1px 8px; font-size: 0.8rem; margin-right: 8px; }"
   ".result-card { background-color: @view_bg_color; border-radius: 12px; padding: 20px; border: 1px solid rgba(0,0,0,0.05); margin-bottom: 12px; }"
   ".result-snippet { font-style: italic; font-size: 1.1rem; line-height: 1.6; margin-bottom: 12px; }"
-  ".result-meta { font-size: 0.85rem; opacity: 0.6; margin-top: 8px; }";
+  ".result-meta { font-size: 0.85rem; opacity: 0.6; margin-top: 8px; }"
+  ".memo-box { border-radius: 10px; border: 1px solid alpha(@card_fg_color, 0.15); background-color: @card_bg_color; overflow: hidden; }";
 
 static char*
 map_html (const char *html, int **out_map, int *out_len)
@@ -554,17 +555,22 @@ show_tag_dialog (CualiAppState *state, int highlight_id)
 
     /* Memo */
     gtk_box_append(GTK_BOX(content_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-    GtkWidget *memo_label = gtk_label_new("Researcher memo");
+    GtkWidget *memo_label = gtk_label_new("Memo");
     gtk_widget_add_css_class(memo_label, "sidebar-title");
     gtk_widget_set_halign(memo_label, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(content_box), memo_label);
 
     GtkWidget *memo_scroll = gtk_scrolled_window_new();
+    gtk_widget_add_css_class(memo_scroll, "memo-box");
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 80);
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 160);
     
     GtkWidget *memo_view = gtk_text_view_new();
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(memo_view), GTK_WRAP_WORD_CHAR);
+    gtk_text_view_set_left_margin(GTK_TEXT_VIEW(memo_view), 8);
+    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(memo_view), 8);
+    gtk_text_view_set_top_margin(GTK_TEXT_VIEW(memo_view), 8);
+    gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(memo_view), 8);
     char *memo_text = NULL;
     if (highlight_id > 0) db_highlight_get_memo(highlight_id, &memo_text);
     if (memo_text) {
@@ -844,7 +850,7 @@ static void build_highlight_dialog(CualiAppState *state)
     GtkWidget *memo_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append(GTK_BOX(box), memo_sep);
 
-    GtkWidget *memo_label = gtk_label_new("Researcher memo");
+    GtkWidget *memo_label = gtk_label_new("Memo");
     gtk_widget_add_css_class(memo_label, "sidebar-title");
     gtk_widget_set_halign(memo_label, GTK_ALIGN_START);
     gtk_widget_set_margin_start(memo_label, 10);
@@ -852,6 +858,7 @@ static void build_highlight_dialog(CualiAppState *state)
     gtk_box_append(GTK_BOX(box), memo_label);
 
     GtkWidget *memo_scroll = gtk_scrolled_window_new();
+    gtk_widget_add_css_class(memo_scroll, "memo-box");
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 80);
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 160);
     gtk_widget_set_margin_start(memo_scroll, 8);
@@ -860,10 +867,10 @@ static void build_highlight_dialog(CualiAppState *state)
 
     state->popover_memo_view = gtk_text_view_new();
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(state->popover_memo_view), GTK_WRAP_WORD_CHAR);
-    gtk_text_view_set_left_margin(GTK_TEXT_VIEW(state->popover_memo_view), 6);
-    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(state->popover_memo_view), 6);
-    gtk_text_view_set_top_margin(GTK_TEXT_VIEW(state->popover_memo_view), 4);
-    gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(state->popover_memo_view), 4);
+    gtk_text_view_set_left_margin(GTK_TEXT_VIEW(state->popover_memo_view), 8);
+    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(state->popover_memo_view), 8);
+    gtk_text_view_set_top_margin(GTK_TEXT_VIEW(state->popover_memo_view), 8);
+    gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(state->popover_memo_view), 8);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(memo_scroll), state->popover_memo_view);
     gtk_box_append(GTK_BOX(box), memo_scroll);
 
