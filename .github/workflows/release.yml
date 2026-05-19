@@ -34,7 +34,7 @@ jobs:
           cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg AppDir/usr/share/icons/hicolor/scalable/apps/
           cp org.cuali.CualiGTK.desktop AppDir/usr/share/applications/
           ./squashfs-root/AppRun --appdir AppDir -d AppDir/usr/share/applications/org.cuali.CualiGTK.desktop -i AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg --output appimage
-          mv Cuali*.AppImage Cuali-x86_64.AppImage
+          ls Cuali*.AppImage | head -1 | xargs -I{} cp {} Cuali-x86_64.AppImage
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -42,16 +42,14 @@ jobs:
           files: Cuali-x86_64.AppImage
 
   build-windows:
-    runs-on: ubuntu-24.04
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install cross-compiler
-        run: |
-          sudo apt update
-          sudo apt install -y gcc-mingw-w64-x86-64 mingw-w64-tools
-
-      - name: Setup MSYS2 environment
+      - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -63,12 +61,11 @@ jobs:
             mingw-w64-x86_64-libadwaita
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-poppler
-            make
+            mingw-w64-x86_64-make
 
       - name: Build
-        shell: msys2 {0}
         run: |
-          make CC=/c/msys64/mingw64/bin/x86_64-w64-mingw32-gcc PKG_CONFIG=/c/msys64/mingw64/bin/x86_64-w64-mingw32-pkg-config
+          make
           mkdir -p dist
           cp cuali-gtk.exe dist/
           cp /c/msys64/mingw64/bin/libgtk-4-0.dll dist/
@@ -92,7 +89,9 @@ jobs:
           cp /c/msys64/mingw64/bin/libpng16-16.dll dist/
 
       - name: Create zip
-        run: cd dist && zip ../Cuali-windows.zip *
+        run: |
+          cd dist
+          7z a ../Cuali-windows.zip *
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
