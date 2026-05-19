@@ -34,6 +34,8 @@ bool db_highlight_get_memo(int highlight_id, char **memo);
 bool db_highlight_link_tag(int highlight_id, int tag_id);
 bool db_highlight_unlink_tag(int highlight_id, int tag_id);
 bool db_highlight_delete(int highlight_id);
+bool db_highlights_shift_offsets(int document_id, int from_offset, int delta);
+bool db_highlight_get_offsets(int highlight_id, int *start, int *end);
 sqlite3_stmt* db_highlights_get_for_document(int document_id);
 
 sqlite3_stmt* db_results_get_all(int project_id);

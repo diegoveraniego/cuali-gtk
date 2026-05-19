@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=Cuali
-Comment=Herramienta de análisis cualitativo
+GenericName=Qualitative Analysis Tool
+Comment=Native qualitative data analysis tool
 Exec=cuali-gtk
 Icon=org.cuali.CualiGTK
 Terminal=false

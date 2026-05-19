@@ -32,7 +32,6 @@ typedef struct {
     int pending_start;
     int pending_end;
     double zoom_level;
-    GtkCssProvider *font_provider;
     bool has_unsaved_changes;
     GtkWidget *save_btn;
 
@@ -52,10 +51,6 @@ typedef struct {
 
     /* Filtro de documentos */
     GtkWidget *doc_filter_entry;
-
-    /* Tags jerarquicas */
-    GtkWidget *tag_tree_view;
-    GtkTreeStore *tag_store;
 } CualiAppState;
 
 void window_init(GtkApplication *app);

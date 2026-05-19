@@ -4,159 +4,158 @@
   <img src="icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg" alt="Cuali" width="128"/>
 </p>
 
-Cuali es una herramienta nativa para el análisis cualitativo de datos, inspirada en Taguette pero construida con C y GTK4/Libadwaita para ofrecer una experiencia rápida, ligera y perfectamente integrada en el escritorio Linux.
+[🇪🇸 Read in Spanish](README.es.md)
 
-## Características
+Cuali is a native tool for qualitative data analysis, inspired by Taguette but built with C and GTK4/Libadwaita to offer a fast, lightweight, and perfectly integrated experience on the Linux desktop.
 
-- **Gestión de Proyectos**: Crea nuevos proyectos o abre archivos .sqlite3 existentes compatibles con el esquema de Taguette.
-- **Historial de Recientes**: Acceso rápido a tus últimos trabajos desde la pantalla de bienvenida.
-- **Importación de Documentos**: Soporte para importar archivos de texto plano (con soporte para PDF mediante Poppler).
-- **Edición en Vivo**: Corrige errores de transcripción directamente en la aplicación con el modo de edición integrado.
-- **Codificación y Resaltado**: Selecciona texto y asigna etiquetas (tags) con un sistema de resaltado persistente y optimizado para modos claro y oscuro.
-- **Menú Interactivo de Etiquetas**: Haz click en cualquier subrayado para abrir un menú flotante centrado en pantalla donde puedes:
-  - Ver todas las etiquetas asignadas actualmente
-  - Crear nuevas etiquetas sobre la marcha
-  - Seleccionar o deseleccionar etiquetas del highlight
-  - El menú es completamente movible para no obstruir tu vista
-- **Análisis de Resultados**: Vista unificada de citas agrupadas por etiqueta, con estadísticas de frecuencia ordenadas de mayor a menor.
-- **Privacidad Total**: Tus datos son tuyos. Todo se guarda en una base de datos SQLite local.
+## Features
 
-## Requisitos
+- **Project Management**: Create new projects or open existing .sqlite3 files compatible with the Taguette schema.
+- **Recent History**: Quick access to your latest work from the welcome screen.
+- **Document Import**: Support for importing plain text files (with PDF support via Poppler).
+- **Live Editing**: Correct transcription errors directly in the application with the integrated editing mode.
+- **Coding and Highlighting**: Select text and assign tags with a persistent highlighting system optimized for light and dark modes.
+- **Interactive Tag Popover**: Click on any highlight to open a popover where you can:
+  - View all currently assigned tags
+  - Create new tags on the fly
+  - Select or deselect tags from the highlight
+- **Results Analysis**: A unified view of quotes grouped by tag, with frequency statistics sorted from highest to lowest.
+- **Total Privacy**: Your data is yours. Everything is saved in a local SQLite database.
 
-Para compilar y ejecutar Cuali, necesitas las siguientes librerías de desarrollo:
+## Requirements
+
+To compile and run Cuali, you need the following development libraries:
 
 - GTK 4
 - Libadwaita 1
 - SQLite 3
 - Poppler GLib
 
-### En Debian/Ubuntu:
+### On Debian/Ubuntu:
 ```bash
 sudo apt install libgtk-4-dev libadwaita-1-dev libsqlite3-dev libpoppler-glib-dev
 ```
 
-### En Fedora:
+### On Fedora:
 ```bash
 sudo dnf install gtk4-devel libadwaita-devel sqlite-devel poppler-glib-devel
 ```
 
-### En Arch:
+### On Arch:
 ```bash
 sudo pacman -S gtk4 libadwaita sqlite poppler-glib
 ```
 
-## Compilación
+## Compilation
 
-Para compilar el proyecto, simplemente ejecuta:
+To compile the project, simply run:
 
 ```bash
 make
 ```
 
-Esto generará el binario ejecutable `cuali-gtk`.
+This will generate the `cuali-gtk` executable binary.
 
-Para limpiar los archivos compilados:
+To clean the compiled files:
 
 ```bash
 make clean
 ```
 
-## Ejecución
+## Running
 
-Para iniciar la aplicación:
+To start the application:
 
 ```bash
 ./cuali-gtk
 ```
 
-## Estructura del Proyecto
+## Project Structure
 
 ```
 cuali-gtk/
 ├── src/
-│   ├── main.c           # Punto de entrada de la aplicación
-│   ├── window.c         # Interfaz gráfica y lógica principal
-│   ├── database.c       # Operaciones con SQLite
-│   └── importer.c       # Importación de documentos
+│   ├── main.c           # Application entry point
+│   ├── window.c         # GUI and main logic
+│   ├── database.c       # SQLite operations
+│   └── importer.c       # Document import
 ├── include/
 │   ├── window.h
 │   ├── database.h
 │   └── importer.h
-├── Makefile             # Configuración de compilación
+├── Makefile             # Build configuration
 └── README.md
 ```
 
-## Cómo Usar
+## How to Use
 
-### 1. Crear un Nuevo Proyecto
-- Haz click en "Crear Nuevo Proyecto" en la pantalla de bienvenida
-- Selecciona dónde guardar el archivo de base de datos (.sqlite3)
-- ¡Listo! Ya puedes empezar a trabajar
+### 1. Create a New Project
+- Click on "Create new project" on the welcome screen.
+- Select where to save the database file (.sqlite3).
+- Done! You can now start working.
 
-### 2. Abrir un Proyecto Existente
-- Usa "Abrir Proyecto Existente" o selecciona uno de la lista de recientes
-- El proyecto se cargará automáticamente
+### 2. Open an Existing Project
+- Use "Open existing project" or select one from the recent list.
+- The project will load automatically.
 
-### 3. Importar Documentos
-- En la pestaña "Documentos", haz click en el botón "+" (Agregar)
-- Selecciona un archivo de texto plano
-- El documento se importará y estará listo para analizar
+### 3. Import Documents
+- In the "Documents" tab, click the "+" (Add) button.
+- Select a plain text or PDF file.
+- The document will be imported and ready to analyze.
 
-### 4. Codificar Texto
-- Selecciona el texto que deseas marcar
-- Presiona el botón de subrayado en la barra de herramientas
-- Elige una etiqueta existente o crea una nueva
-- El texto se resaltará y se asociará con la etiqueta
+### 4. Code Text
+- Select the text you want to code.
+- A popover will appear.
+- Choose an existing tag or create a new one.
+- The text will be highlighted and associated with the tag.
 
-### 5. Interactuar con Highlights
-- **Haz click en cualquier texto subrayado** para abrir el menú de etiquetas
-- Desde el menú puedes:
-  - Ver qué etiquetas están asignadas
-  - Agregar nuevas etiquetas al highlight
-  - Quitar etiquetas existentes
-  - Crear etiquetas nuevas directamente
-- El menú es movible: simplemente arrastra su título para repositionarlo
+### 5. Interact with Highlights
+- Click on any highlighted text to open the tag popover.
+- From the popover you can:
+  - See which tags are assigned.
+  - Add new tags to the highlight.
+  - Remove existing tags.
+  - Create new tags directly.
 
-### 6. Analizar Resultados
-- Ve a la pestaña "Resultados"
-- Verás todas las citas agrupadas por etiqueta
-- Las estadísticas en la izquierda muestran la frecuencia de cada etiqueta
+### 6. Analyze Results
+- Go to the "Results" tab.
+- You will see all quotes grouped by tag.
+- The statistics on the left show the frequency of each tag.
 
-## Licencia
+## License
 
-Este proyecto se distribuye bajo la licencia **BSD 3-Clause**, manteniendo la misma filosofía de código abierto y permisos que Taguette. Consulta el archivo `LICENSE` para más información.
+This project is distributed under the **BSD 3-Clause License**, maintaining the same open-source and permission philosophy as Taguette. See the `LICENSE` file for more information.
 
-## Desarrollo y Contribuciones
+## Development and Contributions
 
-### TODO (Pendientes)
+### TODO
 
-- [ ] **Menú flotante de etiquetas** (EN DESARROLLO): Interfaz interactiva para manejar etiquetas directamente desde los highlights
-- [ ] Corregir error de posicionamiento/tiling de la ventana al abrir proyectos
+- [ ] Fix positioning/tiling bug when opening projects
 - [ ] Fix UI issues and layout stability
-- [ ] Implementar sistema de filtrado en la vista de resultados
-- [ ] Mejorar el rendimiento al cargar documentos extremadamente largos
-- [ ] Añadir soporte para exportación en otros formatos (Excel, CSV)
-- [ ] Soporte para múltiples idiomas (i18n)
-- [ ] Temas personalizables
+- [ ] Implement filtering system in the results view
+- [ ] Improve performance when loading extremely large documents
+- [ ] Add support for exporting in other formats (Excel, CSV)
+- [ ] Multi-language support (i18n)
+- [ ] Customizable themes
 
-### Decisiones de Diseño
+### Design Decisions
 
-- **Por qué C + GTK4**: Para una herramienta de análisis de datos, se prioriza:
-  - **Rendimiento**: C es significativamente más rápido que lenguajes interpretados
-  - **Ligereza**: Bajo consumo de memoria y arranque rápido
-  - **Estabilidad**: GTK4 es maduro y confiable
-  - **Natividad**: Integración perfecta con el escritorio GNOME/Wayland
+- **Why C + GTK4**: For a data analysis tool, the priorities are:
+  - **Performance**: C is significantly faster than interpreted languages.
+  - **Lightweight**: Low memory consumption and fast startup.
+  - **Stability**: GTK4 is mature and reliable.
+  - **Nativeness**: Perfect integration with the GNOME/Wayland desktop.
   
-- **Por qué SQLite**: Base de datos embebida, sin necesidad de servidores externos, perfecta para aplicaciones de escritorio
+- **Why SQLite**: Embedded database, no need for external servers, perfect for desktop applications.
 
-- **Por qué Libadwaita**: Diseño moderno y consistente con el ecosistema GNOME, componentes UI accesibles y bien pulidas
+- **Why Libadwaita**: Modern and consistent design with the GNOME ecosystem, accessible and well-polished UI components.
 
-## Soporte y Reporte de Bugs
+## Support and Bug Reporting
 
-Si encuentras un error o tienes una sugerencia de mejora, por favor abre un [issue](https://github.com/diegoveraniego/cuali-gtk/issues).
+If you find an error or have a suggestion for improvement, please open an [issue](https://github.com/diegoveraniego/cuali-gtk/issues).
 
 ---
 
-**Proyecto desarrollado por Diego (2026).**
+**Project developed by Diego (2026).**
 
-Inspirado en [Taguette](https://www.taguette.org/) y construido con ❤️ usando C y GTK4.
+Inspired by [Taguette](https://www.taguette.org/) and built with ❤️ using C and GTK4.

@@ -6,7 +6,6 @@
 #include <string.h>
 
 const char *style_css = 
-  "textview { font-family: 'Cantarell', sans-serif; font-size: 12pt; background-color: transparent; }"
   ".sidebar-list { background-color: transparent; }"
   ".sidebar-title { font-weight: bold; opacity: 0.5; font-size: 0.8rem; margin-top: 18px; margin-bottom: 6px; margin-left: 12px; }"
   ".document-view { background-color: @window_bg_color; border-radius: 12px; }"
@@ -403,7 +402,7 @@ show_tag_edit_dialog (CualiAppState *state, int tag_id)
     db_tag_get_info (tag_id, &cur_path, &cur_desc, &cur_color);
 
     GtkWidget *dialog = GTK_WIDGET (adw_dialog_new ());
-    adw_dialog_set_title (ADW_DIALOG (dialog), "Editar Etiqueta");
+    adw_dialog_set_title (ADW_DIALOG (dialog), "Edit tag");
     adw_dialog_set_content_width (ADW_DIALOG (dialog), 420);
 
     GtkWidget *toolbar_view = adw_toolbar_view_new ();
@@ -420,12 +419,12 @@ show_tag_edit_dialog (CualiAppState *state, int tag_id)
     adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (group), "");
 
     GtkWidget *name_row = adw_entry_row_new ();
-    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (name_row), "Nombre");
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (name_row), "Name");
     if (cur_path) gtk_editable_set_text (GTK_EDITABLE (name_row), cur_path);
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), name_row);
 
     GtkWidget *desc_row = adw_entry_row_new ();
-    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (desc_row), "Descripción");
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (desc_row), "Description");
     if (cur_desc) gtk_editable_set_text (GTK_EDITABLE (desc_row), cur_desc);
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), desc_row);
 
@@ -448,7 +447,7 @@ show_tag_edit_dialog (CualiAppState *state, int tag_id)
     gtk_widget_set_halign (color_box, GTK_ALIGN_START);
     gtk_box_append (GTK_BOX (content_box), color_box);
 
-    GtkWidget *save_btn = gtk_button_new_with_label ("Guardar");
+    GtkWidget *save_btn = gtk_button_new_with_label ("Save");
     gtk_widget_add_css_class (save_btn, "suggested-action");
     gtk_widget_add_css_class (save_btn, "pill");
     gtk_widget_set_halign (save_btn, GTK_ALIGN_END);
@@ -487,7 +486,7 @@ static void
 show_tag_dialog (CualiAppState *state, int highlight_id)
 {
     GtkWidget *dialog = GTK_WIDGET (adw_dialog_new ());
-    adw_dialog_set_title (ADW_DIALOG (dialog), "Etiquetas");
+    adw_dialog_set_title (ADW_DIALOG (dialog), "Tags");
     adw_dialog_set_content_width (ADW_DIALOG (dialog), 400);
     adw_dialog_set_content_height (ADW_DIALOG (dialog), 500);
 
@@ -502,7 +501,7 @@ show_tag_dialog (CualiAppState *state, int highlight_id)
     gtk_widget_set_margin_bottom (content_box, 12);
 
     GtkWidget *tag_entry = gtk_entry_new ();
-    gtk_entry_set_placeholder_text (GTK_ENTRY (tag_entry), "Nueva etiqueta...");
+    gtk_entry_set_placeholder_text (GTK_ENTRY (tag_entry), "New tag…");
     gtk_box_append (GTK_BOX (content_box), tag_entry);
 
     GtkWidget *scroll = gtk_scrolled_window_new ();
@@ -679,7 +678,7 @@ static void on_popover_closed (GtkPopover *popover, gpointer user_data)
     }
 }
 
-static void show_popover_at(CualiAppState *state, double x, double y, int highlight_id)
+static void show_popover_at(CualiAppState *state, int highlight_id)
 {
     state->active_highlight_id = highlight_id;
     populate_popover_tags(state);
@@ -693,17 +692,53 @@ static void show_popover_at(CualiAppState *state, double x, double y, int highli
     g_free(memo);
     gtk_widget_set_visible(state->popover_memo_view, highlight_id > 0);
 
-    /* Find character line bottom so popover sits below text */
-    int bx, by;
-    gtk_text_view_window_to_buffer_coords(GTK_TEXT_VIEW(state->text_view), GTK_TEXT_WINDOW_WIDGET, (int)x, (int)y, &bx, &by);
-    GtkTextIter iter;
-    gtk_text_view_get_iter_at_location(GTK_TEXT_VIEW(state->text_view), &iter, bx, by);
-    GdkRectangle iter_rect;
-    gtk_text_view_get_iter_location(GTK_TEXT_VIEW(state->text_view), &iter, &iter_rect);
-    int wx, wy;
-    gtk_text_view_buffer_to_window_coords(GTK_TEXT_VIEW(state->text_view), GTK_TEXT_WINDOW_WIDGET, iter_rect.x, iter_rect.y, &wx, &wy);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+    GtkTextIter start_iter, end_iter;
+    bool bounds_valid = false;
 
-    GdkRectangle rect = { (int)x, wy + iter_rect.height, 1, 1 };
+    if (highlight_id > 0) {
+        int start_offset, end_offset;
+        if (db_highlight_get_offsets(highlight_id, &start_offset, &end_offset)) {
+            GtkTextIter buf_start, buf_end;
+            gtk_text_buffer_get_bounds(buffer, &buf_start, &buf_end);
+            char *full_text = gtk_text_buffer_get_text(buffer, &buf_start, &buf_end, FALSE);
+            if (full_text) {
+                int len = strlen(full_text);
+                if (start_offset > len) start_offset = len;
+                if (end_offset > len) end_offset = len;
+                
+                const char* start_ptr = full_text + start_offset;
+                const char* end_ptr = full_text + end_offset;
+
+                int char_start = g_utf8_pointer_to_offset(full_text, start_ptr);
+                int char_end = g_utf8_pointer_to_offset(full_text, end_ptr);
+                g_free(full_text);
+
+                gtk_text_buffer_get_iter_at_offset(buffer, &start_iter, char_start);
+                gtk_text_buffer_get_iter_at_offset(buffer, &end_iter, char_end);
+                bounds_valid = true;
+            }
+        }
+    } else { // New highlight from selection
+        bounds_valid = gtk_text_buffer_get_selection_bounds(buffer, &start_iter, &end_iter);
+    }
+
+    if (!bounds_valid) return;
+
+    GdkRectangle rect;
+    GtkTextView *text_view = GTK_TEXT_VIEW(state->text_view);
+    gtk_text_view_get_iter_location(text_view, &end_iter, &rect);
+
+    gtk_text_view_buffer_to_window_coords(text_view,
+        GTK_TEXT_WINDOW_WIDGET, rect.x, rect.y, &rect.x, &rect.y);
+
+    // Bug 2 Fix: Clamp to allocation
+    int width = gtk_widget_get_width(GTK_WIDGET(text_view));
+    if (rect.x < 8) rect.x = 8;
+    if (rect.x > (width - rect.width - 8)) {
+        rect.x = width - rect.width - 8;
+    }
+    
     gtk_popover_set_pointing_to(GTK_POPOVER(state->highlight_popover), &rect);
     gtk_popover_popup(GTK_POPOVER(state->highlight_popover));
 }
@@ -711,6 +746,7 @@ static void show_popover_at(CualiAppState *state, double x, double y, int highli
 static void build_highlight_popover(CualiAppState *state)
 {
     gtk_popover_set_position(GTK_POPOVER(state->highlight_popover), GTK_POS_BOTTOM);
+    gtk_popover_set_autohide(GTK_POPOVER(state->highlight_popover), TRUE);
     /* GTK4 auto-flips position when popover would go off-screen */
     gtk_popover_set_has_arrow(GTK_POPOVER(state->highlight_popover), TRUE);
 
@@ -730,7 +766,7 @@ static void build_highlight_popover(CualiAppState *state)
     GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append(GTK_BOX(box), sep);
     
-    state->popover_delete_btn = gtk_button_new_with_label("Eliminar highlight");
+    state->popover_delete_btn = gtk_button_new_with_label("Delete highlight");
     gtk_widget_add_css_class(state->popover_delete_btn, "destructive-action");
     gtk_widget_set_margin_start(state->popover_delete_btn, 8);
     gtk_widget_set_margin_end(state->popover_delete_btn, 8);
@@ -743,7 +779,7 @@ static void build_highlight_popover(CualiAppState *state)
     GtkWidget *memo_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append(GTK_BOX(box), memo_sep);
 
-    GtkWidget *memo_label = gtk_label_new("Memo del investigador");
+    GtkWidget *memo_label = gtk_label_new("Researcher memo");
     gtk_widget_add_css_class(memo_label, "sidebar-title");
     gtk_widget_set_halign(memo_label, GTK_ALIGN_START);
     gtk_widget_set_margin_start(memo_label, 10);
@@ -794,7 +830,7 @@ on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, double y,
     for (GSList *l = tags; l; l = l->next) {
         int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (l->data), "highlight-id"));
         if (hl_id > 0) {
-            show_popover_at(state, x, y, hl_id);
+            show_popover_at(state, hl_id);
             break;
         }
     }
@@ -807,12 +843,32 @@ on_text_view_released (GtkGestureClick *gesture, int n_press, double x, double y
     CualiAppState *state = (CualiAppState *)user_data;
     if (state->is_editing) return;
     
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view));
+    GtkTextView *view = GTK_TEXT_VIEW (state->text_view);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (view);
+    
+    int buffer_x, buffer_y;
+    gtk_text_view_window_to_buffer_coords (view, GTK_TEXT_WINDOW_WIDGET, (int)x, (int)y, &buffer_x, &buffer_y);
+    GtkTextIter click_iter;
+    gtk_text_view_get_iter_at_location (view, &click_iter, buffer_x, buffer_y);
+    
+    GSList *tags = gtk_text_iter_get_tags (&click_iter);
+    gboolean clicked_on_highlight = FALSE;
+    for (GSList *l = tags; l; l = l->next) {
+        int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (l->data), "highlight-id"));
+        if (hl_id > 0) {
+            clicked_on_highlight = TRUE;
+            break;
+        }
+    }
+    g_slist_free (tags);
+    
+    if (clicked_on_highlight) return;
+    
     GtkTextIter start, end;
     
     if (!gtk_text_buffer_get_selection_bounds (buffer, &start, &end)) return;
+    if (gtk_text_iter_equal(&start, &end)) return;
     
-    /* Place cursor at start of selection */
     gtk_text_buffer_place_cursor (buffer, &start);
 
     GtkTextIter doc_start;
@@ -827,7 +883,7 @@ on_text_view_released (GtkGestureClick *gesture, int n_press, double x, double y
     g_free(text_before_start);
     g_free(text_before_end);
                          
-    show_popover_at(state, x, y, -1);
+    show_popover_at(state, -1);
 }
 
 static void
@@ -1046,6 +1102,36 @@ on_search_entry_changed (GtkEditable *editable, gpointer user_data)
 
 /* ── Auto-guardado ── */
 
+static gint get_byte_offset(GtkTextBuffer *buffer, GtkTextIter *iter) {
+    GtkTextIter start;
+    gtk_text_buffer_get_start_iter(buffer, &start);
+    char *text = gtk_text_buffer_get_text(buffer, &start, iter, FALSE);
+    gint offset = strlen(text);
+    g_free(text);
+    return offset;
+}
+
+static void on_insert_text(GtkTextBuffer *buffer, GtkTextIter *location, gchar *text, gint len, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!state->is_editing || state->current_document_id <= 0) return;
+
+    int edit_pos_bytes = get_byte_offset(buffer, location);
+    int delta_bytes = strlen(text);
+
+    db_highlights_shift_offsets(state->current_document_id, edit_pos_bytes, delta_bytes);
+}
+
+static void on_delete_range(GtkTextBuffer *buffer, GtkTextIter *start, GtkTextIter *end, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!state->is_editing || state->current_document_id <= 0) return;
+
+    int start_bytes = get_byte_offset(buffer, start);
+    int end_bytes = get_byte_offset(buffer, end);
+    int delta_bytes = -(end_bytes - start_bytes);
+    
+    db_highlights_shift_offsets(state->current_document_id, start_bytes, delta_bytes);
+}
+
 static gboolean
 auto_save_cb (gpointer user_data)
 {
@@ -1166,7 +1252,7 @@ on_drop (GtkDropTarget *target, const GValue *value, double x, double y, gpointe
         refresh_documents (state);
         if (count > 0) {
             char msg[64];
-            snprintf (msg, sizeof (msg), "%d documento(s) importado(s)", count);
+            snprintf (msg, sizeof (msg), "%d document(s) imported", count);
             adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
                                          adw_toast_new (msg));
         }
@@ -1212,7 +1298,7 @@ update_status_bar (CualiAppState *state)
         sqlite3_finalize (stmt);
     }
 
-    char *markup = g_strdup_printf ("<span size='small'>%d palabras · %d caracteres · %d highlights</span>",
+    char *markup = g_strdup_printf ("<span size='small'>%d words · %d characters · %d highlights</span>",
                                     word_count, char_count, hl_count);
     gtk_label_set_markup (GTK_LABEL (state->status_label), markup);
     g_free (markup);
@@ -1237,12 +1323,12 @@ on_window_close_request (GtkWindow *window, gpointer user_data)
 {
     CualiAppState *state = (CualiAppState *)user_data;
     if (state->is_editing && state->has_unsaved_changes) {
-        AdwDialog *dialog = adw_alert_dialog_new ("¿Guardar cambios?", 
-                                                 "Hay cambios sin guardar en el documento actual.");
+        AdwDialog *dialog = adw_alert_dialog_new ("Save changes?", 
+                                                 "There are unsaved changes in the current document.");
         adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (dialog),
-                                       "cancel", "Cancelar",
-                                       "discard", "Descartar",
-                                       "save", "Guardar",
+                                       "cancel", "Cancel",
+                                       "discard", "Discard",
+                                       "save", "Save",
                                        NULL);
         adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "discard", ADW_RESPONSE_DESTRUCTIVE);
         adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "save", ADW_RESPONSE_SUGGESTED);
@@ -1272,7 +1358,7 @@ on_edit_toggle_clicked (GtkButton *button, gpointer user_data)
     if (state->save_btn) gtk_widget_set_visible (state->save_btn, TRUE);
     auto_save_start (state);
     adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
-                                 adw_toast_new ("Modo edición — auto-guardado cada 30s"));
+                                 adw_toast_new ("Editing mode — auto-saving every 30s"));
   } else {
     auto_save_stop (state);
     save_document (state);
@@ -1365,7 +1451,7 @@ refresh_results_tags (CualiAppState *state)
       GtkWidget *edit_btn = gtk_button_new_from_icon_name ("document-edit-symbolic");
       gtk_widget_add_css_class (edit_btn, "flat");
       gtk_widget_set_valign (edit_btn, GTK_ALIGN_CENTER);
-      gtk_widget_set_tooltip_text (edit_btn, "Editar etiqueta");
+      gtk_widget_set_tooltip_text (edit_btn, "Edit tag");
       gpointer *ebargs = g_new (gpointer, 2);
       ebargs[0] = state; ebargs[1] = GINT_TO_POINTER(tag_id);
       g_signal_connect_data (edit_btn, "clicked", G_CALLBACK (on_tag_edit_btn_clicked),
@@ -1553,7 +1639,7 @@ refresh_tags (CualiAppState *state)
             GtkWidget *eb = gtk_button_new_from_icon_name ("document-edit-symbolic");
             gtk_widget_add_css_class (eb, "flat");
             gtk_widget_set_valign (eb, GTK_ALIGN_CENTER);
-            gtk_widget_set_tooltip_text (eb, "Editar etiqueta");
+            gtk_widget_set_tooltip_text (eb, "Edit tag");
             gpointer *args = g_new (gpointer, 2);
             args[0] = ctx->state; args[1] = GINT_TO_POINTER (n->tag_id);
             g_signal_connect_data (eb, "clicked", G_CALLBACK (on_tag_edit_btn_clicked),
@@ -1656,17 +1742,20 @@ refresh_results (CualiAppState *state)
 static void
 update_zoom (CualiAppState *state)
 {
-    if (!state->font_provider) {
-        state->font_provider = gtk_css_provider_new ();
-        gtk_style_context_add_provider (gtk_widget_get_style_context (state->text_view),
-                                       GTK_STYLE_PROVIDER (state->font_provider),
-                                       GTK_STYLE_PROVIDER_PRIORITY_USER);
-    }
-    char zoom_str[32];
-    g_ascii_formatd (zoom_str, sizeof (zoom_str), "%.1f", 12.0 * state->zoom_level);
-    char *css = g_strdup_printf ("textview { font-size: %spt; }", zoom_str);
-    gtk_css_provider_load_from_string (state->font_provider, css);
-    g_free (css);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    
+    // Remove old zoom tag if it exists
+    gtk_text_buffer_remove_tag_by_name(buffer, "zoom", &start, &end);
+    
+    double font_size_pt = 12.0 * state->zoom_level;
+    
+    GtkTextTag *tag = gtk_text_buffer_create_tag(buffer, "zoom",
+                                               "size-points", font_size_pt,
+                                               NULL);
+    
+    gtk_text_buffer_apply_tag(buffer, tag, &start, &end);
 }
 
 static void
@@ -1793,6 +1882,7 @@ refresh_documents (CualiAppState *state)
       
       GtkWidget *delete_btn = gtk_button_new_from_icon_name ("user-trash-symbolic");
       gtk_widget_add_css_class (delete_btn, "flat");
+      gtk_widget_add_css_class (delete_btn, "destructive-action");
       gtk_widget_set_valign (delete_btn, GTK_ALIGN_CENTER);
       g_object_set_data (G_OBJECT (row), "doc-id", GINT_TO_POINTER (id));
       g_object_set_data (G_OBJECT (row), "app-state", state);
@@ -1943,6 +2033,8 @@ open_project_at_path (CualiAppState *state, const char *path)
       refresh_all (state);
       adw_view_stack_set_visible_child_name (ADW_VIEW_STACK (state->root_stack), "main");
       add_to_recent (path);
+    } else {
+        g_printerr("Failed to initialize database at %s\n", path);
     }
 }
 
@@ -2039,7 +2131,7 @@ on_about_action (GtkButton *button, gpointer user_data)
                           "application-name", "Cuali",
                           "application-icon", "org.cuali.CualiGTK",
                           "version", "0.1.0",
-                          "comments", "Herramienta de análisis cualitativo",
+                          "comments", "Qualitative analysis tool",
                           "developer-name", "Diego Veraniego",
                           NULL);
 }
@@ -2099,20 +2191,20 @@ void window_init(GtkApplication *app) {
     gtk_image_set_pixel_size (GTK_IMAGE (logo), 128);
     gtk_box_append (GTK_BOX (welcome_content), logo);
 
-    GtkWidget *title = gtk_label_new ("Bienvenido a Cuali");
+    GtkWidget *title = gtk_label_new ("Welcome to Cuali");
     gtk_widget_add_css_class (title, "title-1");
     gtk_box_append (GTK_BOX (welcome_content), title);
 
     GtkWidget *btns_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
     gtk_box_append (GTK_BOX (welcome_content), btns_box);
 
-    GtkWidget *open_btn = gtk_button_new_with_label ("Abrir Proyecto Existente");
+    GtkWidget *open_btn = gtk_button_new_with_label ("Open existing project");
     gtk_widget_add_css_class (open_btn, "suggested-action");
     gtk_widget_add_css_class (open_btn, "pill");
     g_signal_connect (open_btn, "clicked", G_CALLBACK (on_open_project_clicked), state);
     gtk_box_append (GTK_BOX (btns_box), open_btn);
 
-    GtkWidget *new_btn = gtk_button_new_with_label ("Crear Nuevo Proyecto");
+    GtkWidget *new_btn = gtk_button_new_with_label ("Create new project");
     gtk_widget_add_css_class (new_btn, "pill");
     g_signal_connect (new_btn, "clicked", G_CALLBACK (on_new_project_clicked), state);
     gtk_box_append (GTK_BOX (btns_box), new_btn);
@@ -2121,7 +2213,7 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_margin_top (recent_box, 30);
     gtk_box_append (GTK_BOX (welcome_content), recent_box);
     
-    GtkWidget *recent_label = gtk_label_new ("Proyectos Recientes");
+    GtkWidget *recent_label = gtk_label_new ("Recent projects");
     gtk_widget_add_css_class (recent_label, "sidebar-title");
     gtk_box_append (GTK_BOX (recent_box), recent_label);
     
@@ -2180,7 +2272,7 @@ void window_init(GtkApplication *app) {
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), state->edit_toggle);
     g_signal_connect (state->edit_toggle, "clicked", G_CALLBACK (on_edit_toggle_clicked), state);
 
-    state->save_btn = gtk_button_new_with_label ("Guardar");
+    state->save_btn = gtk_button_new_with_label ("Save");
     gtk_widget_add_css_class (state->save_btn, "suggested-action");
     gtk_widget_set_visible (state->save_btn, FALSE);
     gtk_widget_set_sensitive (state->save_btn, FALSE);
@@ -2193,14 +2285,15 @@ void window_init(GtkApplication *app) {
     gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (menu_btn), "open-menu-symbolic");
 
     GtkWidget *menu_popover = gtk_popover_new ();
+    gtk_popover_set_autohide(GTK_POPOVER(menu_popover), TRUE);
     GtkWidget *menu_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
-    GtkWidget *import_item = gtk_button_new_with_label ("Importar documento…");
+    GtkWidget *import_item = gtk_button_new_with_label ("Import document…");
     gtk_widget_set_halign (import_item, GTK_ALIGN_START);
     g_signal_connect (import_item, "clicked", G_CALLBACK (on_add_button_clicked), state);
     gtk_box_append (GTK_BOX (menu_box), import_item);
 
-    GtkWidget *about_item = gtk_button_new_with_label ("Acerca de Cuali");
+    GtkWidget *about_item = gtk_button_new_with_label ("About Cuali");
     gtk_widget_set_halign (about_item, GTK_ALIGN_START);
     g_signal_connect (about_item, "clicked", G_CALLBACK (on_about_action), state);
     gtk_box_append (GTK_BOX (menu_box), about_item);
@@ -2212,28 +2305,28 @@ void window_init(GtkApplication *app) {
     /* --- Pestaña 1: Información --- */
     GtkWidget *info_page = adw_preferences_page_new ();
     AdwViewStackPage *page;
-    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), info_page, "info", "Información");
+    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), info_page, "info", "Information");
     adw_view_stack_page_set_icon_name (page, "dialog-information-symbolic");
     
     GtkWidget *info_group = adw_preferences_group_new ();
-    adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (info_group), "Metadatos del Proyecto");
+    adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (info_group), "Project metadata");
     adw_preferences_page_add (ADW_PREFERENCES_PAGE (info_page), ADW_PREFERENCES_GROUP (info_group));
     
     GtkWidget *name_row = adw_entry_row_new ();
-    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (name_row), "Nombre del Proyecto");
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (name_row), "Project name");
     state->project_name_entry = name_row;
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group), name_row);
     g_signal_connect (name_row, "changed", G_CALLBACK (on_project_info_changed), state);
 
     GtkWidget *desc_row = adw_entry_row_new ();
-    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (desc_row), "Descripción");
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (desc_row), "Description");
     state->project_desc_entry = desc_row;
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group), desc_row);
     g_signal_connect (desc_row, "changed", G_CALLBACK (on_project_info_changed), state);
 
     /* --- Pestaña 2: Documentos --- */
     GtkWidget *analysis_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), analysis_box, "analysis", "Documentos");
+    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), analysis_box, "analysis", "Documents");
     adw_view_stack_page_set_icon_name (page, "text-x-generic-symbolic");
     
     GtkWidget *split_view = adw_overlay_split_view_new();
@@ -2246,7 +2339,7 @@ void window_init(GtkApplication *app) {
     
     /* ── Document filter ── */
     state->doc_filter_entry = gtk_search_entry_new ();
-    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->doc_filter_entry), "Filtrar documentos…");
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->doc_filter_entry), "Filter documents…");
     gtk_widget_set_margin_start (state->doc_filter_entry, 8);
     gtk_widget_set_margin_end (state->doc_filter_entry, 8);
     gtk_widget_set_margin_top (state->doc_filter_entry, 8);
@@ -2270,7 +2363,7 @@ void window_init(GtkApplication *app) {
     gtk_box_append(GTK_BOX(sidebar_box), tag_entry_box);
 
     GtkWidget *tag_entry = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(tag_entry), "+ Nueva etiqueta...");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(tag_entry), "+ New tag…");
     gtk_widget_set_hexpand(tag_entry, TRUE);
     g_signal_connect(tag_entry, "activate", G_CALLBACK(on_sidebar_new_tag_activated), state);
     gtk_box_append(GTK_BOX(tag_entry_box), tag_entry);
@@ -2301,7 +2394,7 @@ void window_init(GtkApplication *app) {
     gtk_button_set_child (GTK_BUTTON (doc_toggle_btn), doc_toggle_icon);
     gtk_widget_add_css_class (doc_toggle_btn, "flat");
     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (doc_toggle_btn), TRUE);
-    gtk_widget_set_tooltip_text (doc_toggle_btn, "Mostrar/ocultar documentos");
+    gtk_widget_set_tooltip_text (doc_toggle_btn, "Show/hide documents");
     gtk_box_append (GTK_BOX (doc_toolbar), doc_toggle_btn);
     g_signal_connect (doc_toggle_btn, "toggled", G_CALLBACK (on_doc_sidebar_toggle), split_view);
 
@@ -2329,7 +2422,7 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_margin_bottom (search_box, 6);
 
     state->search_entry = gtk_search_entry_new ();
-    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->search_entry), "Buscar en el documento…");
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->search_entry), "Search in document…");
     gtk_widget_set_hexpand (state->search_entry, TRUE);
     gtk_search_bar_set_child (GTK_SEARCH_BAR (state->search_bar), search_box);
     gtk_search_bar_connect_entry (GTK_SEARCH_BAR (state->search_bar), GTK_EDITABLE (state->search_entry));
@@ -2337,13 +2430,13 @@ void window_init(GtkApplication *app) {
 
     GtkWidget *search_prev = gtk_button_new_from_icon_name ("go-up-symbolic");
     gtk_widget_add_css_class (search_prev, "flat");
-    gtk_widget_set_tooltip_text (search_prev, "Anterior (Shift+Enter)");
+    gtk_widget_set_tooltip_text (search_prev, "Previous (Shift+Enter)");
     g_signal_connect (search_prev, "clicked", G_CALLBACK (on_search_prev_clicked), state);
     gtk_box_append (GTK_BOX (search_box), search_prev);
 
     GtkWidget *search_next = gtk_button_new_from_icon_name ("go-down-symbolic");
     gtk_widget_add_css_class (search_next, "flat");
-    gtk_widget_set_tooltip_text (search_next, "Siguiente (Enter)");
+    gtk_widget_set_tooltip_text (search_next, "Next (Enter)");
     g_signal_connect (search_next, "clicked", G_CALLBACK (on_search_next_clicked), state);
     gtk_box_append (GTK_BOX (search_box), search_next);
 
@@ -2371,7 +2464,10 @@ void window_init(GtkApplication *app) {
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (content_scroll), paper_box);
     GtkWidget *text_view = gtk_text_view_new();
     state->text_view = text_view;
-    g_signal_connect (gtk_text_view_get_buffer (GTK_TEXT_VIEW (text_view)), "changed", G_CALLBACK (on_buffer_changed), state);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    g_signal_connect (buffer, "changed", G_CALLBACK (on_buffer_changed), state);
+    g_signal_connect(buffer, "insert-text", G_CALLBACK(on_insert_text), state);
+    g_signal_connect(buffer, "delete-range", G_CALLBACK(on_delete_range), state);
     
     /* Create popover once and parent it */
     state->highlight_popover = gtk_popover_new();
@@ -2419,7 +2515,7 @@ void window_init(GtkApplication *app) {
 
     /* --- Pestaña 3: Resultados --- */
     GtkWidget *results_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), results_box, "results", "Resultados");
+    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), results_box, "results", "Results");
     adw_view_stack_page_set_icon_name (page, "view-list-bullet-symbolic");
 
     GtkWidget *res_split_view = adw_overlay_split_view_new();
@@ -2432,7 +2528,7 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_size_request (res_sidebar, 250, -1);
     adw_overlay_split_view_set_sidebar(ADW_OVERLAY_SPLIT_VIEW(res_split_view), res_sidebar);
 
-    GtkWidget *stats_title = gtk_label_new("Estadísticas");
+    GtkWidget *stats_title = gtk_label_new("Statistics");
     gtk_widget_add_css_class (stats_title, "sidebar-title");
     gtk_widget_set_halign (stats_title, GTK_ALIGN_START);
     gtk_widget_set_margin_start (stats_title, 12);
@@ -2463,7 +2559,7 @@ void window_init(GtkApplication *app) {
     gtk_button_set_child (GTK_BUTTON (res_toggle_btn), toggle_icon);
     gtk_widget_add_css_class (res_toggle_btn, "flat");
     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (res_toggle_btn), TRUE);
-    gtk_widget_set_tooltip_text (res_toggle_btn, "Mostrar/ocultar filtros");
+    gtk_widget_set_tooltip_text (res_toggle_btn, "Show/hide filters");
     gtk_box_append (GTK_BOX (res_toolbar), res_toggle_btn);
     g_signal_connect (res_toggle_btn, "toggled",
                       G_CALLBACK (on_res_sidebar_toggle),

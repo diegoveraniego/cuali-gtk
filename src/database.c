@@ -299,6 +299,68 @@ bool db_highlight_unlink_tag(int highlight_id, int tag_id) {
     return success;
 }
 
+bool db_highlight_get_offsets(int highlight_id, int *start, int *end) {
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT start_offset, end_offset FROM highlights WHERE id = ?;";
+    bool found = false;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, highlight_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            if (start) *start = sqlite3_column_int(stmt, 0);
+            if (end)   *end   = sqlite3_column_int(stmt, 1);
+            found = true;
+        }
+        sqlite3_finalize(stmt);
+    }
+    return found;
+}
+
+bool db_highlights_shift_offsets(int document_id, int from_offset, int delta) {
+    if (!db) return false;
+    sqlite3_stmt *stmt;
+    const char *sql = "UPDATE highlights "
+                      "SET start_offset = start_offset + ?, "
+                      "    end_offset = end_offset + ? "
+                      "WHERE document_id = ? AND start_offset >= ?;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement for shifting offsets: %s\n", sqlite3_errmsg(db));
+        return false;
+    }
+
+    sqlite3_bind_int(stmt, 1, delta);
+    sqlite3_bind_int(stmt, 2, delta);
+    sqlite3_bind_int(stmt, 3, document_id);
+    sqlite3_bind_int(stmt, 4, from_offset);
+
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    if (!success) {
+        fprintf(stderr, "Failed to execute statement for shifting offsets: %s\n", sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(stmt);
+
+    // Also update highlights that contain the edit
+    const char *sql_contain = "UPDATE highlights "
+                              "SET end_offset = end_offset + ? "
+                              "WHERE document_id = ? AND start_offset < ? AND end_offset >= ?;";
+    
+    if (sqlite3_prepare_v2(db, sql_contain, -1, &stmt, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement for shifting contained offsets: %s\n", sqlite3_errmsg(db));
+        return false;
+    }
+    sqlite3_bind_int(stmt, 1, delta);
+    sqlite3_bind_int(stmt, 2, document_id);
+    sqlite3_bind_int(stmt, 3, from_offset);
+    sqlite3_bind_int(stmt, 4, from_offset);
+    
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+         fprintf(stderr, "Failed to execute statement for shifting contained offsets: %s\n", sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(stmt);
+
+    return success;
+}
+
 bool db_highlight_delete(int highlight_id) {
     if (!db) return false;
     sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
