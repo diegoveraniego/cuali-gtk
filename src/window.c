@@ -361,6 +361,7 @@ on_dialog_new_tag_activated (GtkEntry *entry, gpointer user_data)
         GtkWidget *list_box = GTK_WIDGET (g_object_get_data (G_OBJECT (entry), "list_box"));
         populate_tag_dialog_list (state, highlight_id, list_box);
         refresh_results (state);
+        refresh_tags (state);
     }
 }
 
@@ -539,6 +540,7 @@ static void on_popover_delete_clicked(GtkButton *btn, gpointer user_data)
         load_document(state, state->current_document_id, name, contents);
     }
     refresh_results(state);
+    refresh_tags(state);
 }
 
 static void on_popover_tag_toggled(GtkCheckButton *check, gpointer user_data)
@@ -551,6 +553,7 @@ static void on_popover_tag_toggled(GtkCheckButton *check, gpointer user_data)
         if (active) db_highlight_link_tag(state->active_highlight_id, tag_id);
         else        db_highlight_unlink_tag(state->active_highlight_id, tag_id);
         refresh_results(state);
+        refresh_tags(state);
     } else if (state->active_highlight_id == -1 && active) {
         GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
         GtkTextIter start_iter, end_iter;
@@ -583,6 +586,7 @@ static void on_popover_tag_toggled(GtkCheckButton *check, gpointer user_data)
             apply_highlight_tag(buffer, hl_id, &start_iter, &end_iter);
             state->active_highlight_id = hl_id;
             refresh_results(state);
+            refresh_tags(state);
         }
     }
 }
@@ -1672,6 +1676,7 @@ on_sidebar_new_tag_activated (GtkEntry *entry, gpointer user_data)
         db_tag_add (state->current_project_id, text, "", color);
         gtk_editable_set_text (GTK_EDITABLE (entry), "");
         refresh_tags (state);
+        refresh_results (state);
     }
 }
 
@@ -1797,8 +1802,8 @@ refresh_tags (CualiAppState *state)
         gtk_list_box_append (ctx->list, GTK_WIDGET (row));
         g_free (ctx);
 
-        /* Enqueue children for non-leaf */
-        if (!is_leaf || depth == 0) {
+        /* Enqueue children */
+        if (n->children) {
             for (GList *l = n->children; l; l = l->next) {
                 FlattenCtx *c = g_new (FlattenCtx, 1);
                 c->node = (TagNode *)l->data;
@@ -1928,6 +1933,7 @@ on_delete_doc_clicked (GtkButton *button, gpointer user_data)
       gtk_text_buffer_set_text (gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view)), "", -1);
     }
     refresh_documents (state);
+    refresh_results (state);
   }
 }
 

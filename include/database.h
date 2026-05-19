@@ -18,7 +18,7 @@ bool db_document_update_contents(int document_id, const char *contents);
 bool db_document_delete(int document_id);
 sqlite3_stmt* db_documents_get_all(int project_id);
 
-bool db_tag_add(int project_id, const char *path, const char *description, const char *color);
+int db_tag_add(int project_id, const char *path, const char *description, const char *color);
 bool db_tag_update(int tag_id, const char *path, const char *description);
 bool db_tag_update_color(int tag_id, const char *color);
 bool db_tag_get_info(int tag_id, char **path, char **description, char **color);

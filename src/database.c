@@ -157,20 +157,25 @@ bool db_document_update_contents(int document_id, const char *contents) {
     return success;
 }
 
-bool db_tag_add(int project_id, const char *path, const char *description, const char *color) {
+int db_tag_add(int project_id, const char *path, const char *description, const char *color) {
     sqlite3_stmt *stmt;
     const char *sql = "INSERT INTO tags (project_id, path, description, color) VALUES (?, ?, ?, ?);";
     
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return -1;
     
     sqlite3_bind_int(stmt, 1, project_id);
     sqlite3_bind_text(stmt, 2, path, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, description, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 4, color, -1, SQLITE_STATIC);
     
-    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    if (sqlite3_step(stmt) == SQLITE_DONE) {
+        int id = (int)sqlite3_last_insert_rowid(db);
+        sqlite3_finalize(stmt);
+        return id;
+    }
+    
     sqlite3_finalize(stmt);
-    return success;
+    return -1;
 }
 
 bool db_tag_get_info(int tag_id, char **path, char **description, char **color) {
