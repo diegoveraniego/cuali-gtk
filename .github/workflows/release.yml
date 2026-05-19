@@ -10,32 +10,23 @@ permissions:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y libgtk-4-dev libadwaita-1-dev libsqlite3-dev libpoppler-glib-dev ca-certificates
+          sudo apt install -y libgtk-4-dev libadwaita-1-dev libsqlite3-dev libpoppler-glib-dev
 
       - name: Build binary
         run: make
 
       - name: Build AppImage
         run: |
-          set -e
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.sh
           chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk-x86_64.sh
-          
-          ./linuxdeploy-x86_64.AppImage --appimage-extract
-          mv linuxdeploy-plugin-gtk-x86_64.sh linuxdeploy-plugin-gtk.sh
-          export PATH="$PATH:."
-          
-          # Workaround for strip issue on Ubuntu 24.04
-          rm -f squashfs-root/usr/bin/strip || true
-          ln -s /usr/bin/strip squashfs-root/usr/bin/strip || true
           
           mkdir -p AppDir/usr/bin
           cp cuali-gtk AppDir/usr/bin/
@@ -47,20 +38,20 @@ jobs:
           cp org.cuali.CualiGTK.desktop AppDir/usr/share/applications/
           
           export DEPLOY_GTK_VERSION=4
-          ./squashfs-root/AppRun --appdir AppDir \
-            -d AppDir/usr/share/applications/org.cuali.CualiGTK.desktop \
-            -i AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg \
+          # Use the plugin by placing it in the current directory and giving it the expected name
+          mv linuxdeploy-plugin-gtk-x86_64.sh linuxdeploy-plugin-gtk.sh
+          PATH=".:$PATH" ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/org.cuali.CualiGTK.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg \
             --plugin gtk --output appimage
           
-          # Find and rename the produced AppImage
-          sh -c 'for f in Cuali*.AppImage; do mv "$f" Cuali-x86_64.AppImage && break; done'
+          # Rename for release
+          mv Cuali*.AppImage Cuali-x86_64.AppImage
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
           files: Cuali-x86_64.AppImage
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
     runs-on: windows-latest
@@ -79,13 +70,14 @@ jobs:
             mingw-w64-x86_64-libadwaita
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-poppler
-            make
+            mingw-w64-x86_64-make
             zip
 
       - name: Build
         shell: msys2 {0}
         run: |
-          make
+          # Use mingw32-make as it is the one provided by mingw-w64-x86_64-make
+          mingw32-make
           mkdir -p dist
           cp cuali-gtk.exe dist/
           # Collect dependencies
@@ -113,8 +105,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: Cuali-windows.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
     runs-on: macos-latest
@@ -160,5 +150,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: Cuali-macos.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
