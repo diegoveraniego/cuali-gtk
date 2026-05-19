@@ -1,0 +1,37 @@
+app-id: org.cuali.CualiGTK
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+command: cuali-gtk
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=host
+
+modules:
+  - name: poppler
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_GTK_TESTS=OFF
+      - -DBUILD_QT5_TESTS=OFF
+      - -DBUILD_QT6_TESTS=OFF
+      - -DBUILD_CPP_TESTS=OFF
+      - -DENABLE_QT5=OFF
+      - -DENABLE_QT6=OFF
+      - -DENABLE_BOOST=OFF
+      - -DENABLE_GLIB=ON
+    sources:
+      - type: archive
+        url: https://poppler.freedesktop.org/poppler-24.04.0.tar.xz
+        sha256: 08ddc0d383b7ff834a9b6c8daeaf8fdf3c7333a948ecff2a7e721d2de7bc77f3
+
+  - name: cuali-gtk
+    buildsystem: simple
+    build-commands:
+      - make
+      - make install PREFIX=/app
+    sources:
+      - type: dir
+        path: .

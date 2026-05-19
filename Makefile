@@ -17,4 +17,16 @@ $(TARGET): $(OBJ)
 clean:
 	rm -f $(OBJ) $(TARGET)
 
-.PHONY: all clean
+PREFIX ?= /usr
+BINDIR ?= $(PREFIX)/bin
+DATADIR ?= $(PREFIX)/share
+
+install: $(TARGET)
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/
+	install -d $(DESTDIR)$(DATADIR)/applications
+	install -m 644 org.cuali.CualiGTK.desktop $(DESTDIR)$(DATADIR)/applications/
+	install -d $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps
+	install -m 644 assets/icon.svg $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg
+
+.PHONY: all clean install
