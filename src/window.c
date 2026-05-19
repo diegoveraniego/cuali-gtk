@@ -2406,11 +2406,13 @@ void window_init(GtkApplication *app) {
     GtkWidget *open_btn = gtk_button_new_with_label ("Open existing project");
     gtk_widget_add_css_class (open_btn, "suggested-action");
     gtk_widget_add_css_class (open_btn, "pill");
+    gtk_widget_set_halign (open_btn, GTK_ALIGN_CENTER);
     g_signal_connect (open_btn, "clicked", G_CALLBACK (on_open_project_clicked), state);
     gtk_box_append (GTK_BOX (btns_box), open_btn);
 
     GtkWidget *new_btn = gtk_button_new_with_label ("Create new project");
     gtk_widget_add_css_class (new_btn, "pill");
+    gtk_widget_set_halign (new_btn, GTK_ALIGN_CENTER);
     g_signal_connect (new_btn, "clicked", G_CALLBACK (on_new_project_clicked), state);
     gtk_box_append (GTK_BOX (btns_box), new_btn);
 
