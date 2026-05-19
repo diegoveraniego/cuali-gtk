@@ -26,19 +26,34 @@ jobs:
         run: |
           set -e
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.sh
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk-x86_64.sh
+          
           ./linuxdeploy-x86_64.AppImage --appimage-extract
+          mv linuxdeploy-plugin-gtk-x86_64.sh linuxdeploy-plugin-gtk.sh
+          export PATH="$PATH:."
+          
+          # Workaround for strip issue on Ubuntu 24.04
           rm -f squashfs-root/usr/bin/strip || true
           ln -s /usr/bin/strip squashfs-root/usr/bin/strip || true
-          mkdir -p AppDir/usr/{bin,share/{applications,icons/hicolor/scalable/apps}}
-          cp -v ./cuali-gtk AppDir/usr/bin/
-          cp -v icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg AppDir/usr/share/icons/hicolor/scalable/apps/ || true
-          cp -v org.cuali.CualiGTK.desktop AppDir/usr/share/applications/ || true
-          ./squashfs-root/AppRun --appdir AppDir -d AppDir/usr/share/applications/org.cuali.CualiGTK.desktop -i AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg --output appimage
-          echo "AppImage files produced:"
-          ls -1 *.AppImage || true
-          # copy first AppImage to a stable name
-          sh -c 'for f in *.AppImage; do cp "$f" Cuali-x86_64.AppImage && break; done'
+          
+          mkdir -p AppDir/usr/bin
+          cp cuali-gtk AppDir/usr/bin/
+          
+          # Setup icon and desktop file
+          mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
+          cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg AppDir/usr/share/icons/hicolor/scalable/apps/
+          mkdir -p AppDir/usr/share/applications
+          cp org.cuali.CualiGTK.desktop AppDir/usr/share/applications/
+          
+          export DEPLOY_GTK_VERSION=4
+          ./squashfs-root/AppRun --appdir AppDir \
+            -d AppDir/usr/share/applications/org.cuali.CualiGTK.desktop \
+            -i AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg \
+            --plugin gtk --output appimage
+          
+          # Find and rename the produced AppImage
+          sh -c 'for f in Cuali*.AppImage; do mv "$f" Cuali-x86_64.AppImage && break; done'
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -49,9 +64,6 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,43 +79,35 @@ jobs:
             mingw-w64-x86_64-libadwaita
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-poppler
-            mingw-w64-x86_64-make
+            make
+            zip
 
       - name: Build
+        shell: msys2 {0}
         run: |
           make
           mkdir -p dist
-          cp -v cuali-gtk.exe dist/ || true
-          cp -v /c/msys64/mingw64/bin/libgtk-4-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libadwaita-1-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libglib-2.0-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libgobject-2.0-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libgio-2.0-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libpango-1.0-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libpangocairo-1.0-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libcairo-2.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libsqlite3-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libpoppler-glib-8.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libgraphene-1.0-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libgdk_pixbuf-2.0-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libharfbuzz-0.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libfreetype-6.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libfontconfig-1.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libintl-8.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libiconv-2.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libz-1.dll dist/ || true
-          cp -v /c/msys64/mingw64/bin/libpng16-16.dll dist/ || true
+          cp cuali-gtk.exe dist/
+          # Collect dependencies
+          ldd cuali-gtk.exe | grep '/mingw64/bin/' | awk '{print $3}' | xargs -I{} cp {} dist/
+          # Copy essential standard libraries
+          cp /mingw64/bin/libwinpthread-1.dll dist/ 2>/dev/null || true
+          cp /mingw64/bin/libgcc_s_seh-1.dll dist/ 2>/dev/null || true
+          cp /mingw64/bin/libstdc++-6.dll dist/ 2>/dev/null || true
+          
+          # Copy icons and other assets
+          mkdir -p dist/share/icons/hicolor/scalable/apps
+          cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg dist/share/icons/hicolor/scalable/apps/
+          
+          # Compile schemas
+          mkdir -p dist/share/glib-2.0/schemas
+          cp /mingw64/share/glib-2.0/schemas/*.xml dist/share/glib-2.0/schemas/ 2>/dev/null || true
+          glib-compile-schemas dist/share/glib-2.0/schemas/
 
-      - name: Create zip (PowerShell)
-        shell: pwsh
+      - name: Create zip
+        shell: msys2 {0}
         run: |
-          if (Test-Path dist) {
-            Compress-Archive -Path (Join-Path $PWD 'dist' '*') -DestinationPath Cuali-windows.zip -Force
-            Write-Host "Created Cuali-windows.zip"
-            Get-ChildItem -Path . -Filter Cuali-windows.zip | Select-Object Name,Length
-          } else {
-            Write-Error "dist folder not found"
-          }
+          zip -r Cuali-windows.zip dist/*
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -124,8 +128,8 @@ jobs:
         run: |
           make
           mkdir -p Cuali.app/Contents/{MacOS,Resources}
-          cp cuali-gtk Cuali.app/Contents/MacOS/ || true
-          cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg Cuali.app/Contents/Resources/ || true
+          cp cuali-gtk Cuali.app/Contents/MacOS/
+          cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg Cuali.app/Contents/Resources/
           cat > Cuali.app/Contents/Info.plist << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -150,7 +154,7 @@ jobs:
           </dict>
           </plist>
           PLIST
-          tar -czf Cuali-macos.tar.gz Cuali.app || true
+          tar -czf Cuali-macos.tar.gz Cuali.app
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
