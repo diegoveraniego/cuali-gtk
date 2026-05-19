@@ -7,11 +7,11 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -46,7 +46,53 @@ jobs:
         UPD_INFO: "gh-releases-zsync|your-username|cuali-gtk|latest|*x86_64.AppImage.zsync"
 
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Cuali-AppImage
         path: Cuali-*.AppImage
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: brew install gtk4 libadwaita sqlite poppler pkg-config
+
+    - name: Build project
+      run: make -j$(sysctl -n hw.ncpu)
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Cuali-macOS
+        path: cuali-gtk
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          mingw-w64-ucrt-x86_64-gcc
+          mingw-w64-ucrt-x86_64-pkgconf
+          mingw-w64-ucrt-x86_64-gtk4
+          mingw-w64-ucrt-x86_64-libadwaita
+          mingw-w64-ucrt-x86_64-sqlite3
+          mingw-w64-ucrt-x86_64-poppler
+          make
+
+    - name: Build project
+      shell: msys2 {0}
+      run: make -j$NUMBER_OF_PROCESSORS
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Cuali-Windows
+        path: cuali-gtk.exe
