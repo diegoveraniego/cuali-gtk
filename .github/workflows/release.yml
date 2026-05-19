@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -25,16 +25,29 @@ jobs:
       - name: Build AppImage
         run: |
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
-          ./linuxdeploy-x86_64.AppImage --appimage-extract
-          rm squashfs-root/usr/bin/strip
-          ln -s /usr/bin/strip squashfs-root/usr/bin/strip
-          mkdir -p AppDir/usr/{bin,share/{applications,icons/hicolor/scalable/apps}}
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.sh
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk-x86_64.sh
+          
+          # Make plugin discoverable
+          mv linuxdeploy-plugin-gtk-x86_64.sh linuxdeploy-plugin-gtk.sh
+          export PATH="$PATH:."
+          
+          mkdir -p AppDir/usr/bin
           cp cuali-gtk AppDir/usr/bin/
+          
+          # Setup icon and desktop file for linuxdeploy
+          mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
           cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg AppDir/usr/share/icons/hicolor/scalable/apps/
+          mkdir -p AppDir/usr/share/applications
           cp org.cuali.CualiGTK.desktop AppDir/usr/share/applications/
-          ./squashfs-root/AppRun --appdir AppDir -d AppDir/usr/share/applications/org.cuali.CualiGTK.desktop -i AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg --output appimage
-          ls Cuali*.AppImage | head -1 | xargs -I{} cp {} Cuali-x86_64.AppImage
+          
+          export DEPLOY_GTK_VERSION=4
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+            -d AppDir/usr/share/applications/org.cuali.CualiGTK.desktop \
+            -i AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg \
+            --plugin gtk --output appimage
+          
+          mv Cuali*.AppImage Cuali-x86_64.AppImage
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -43,9 +56,6 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
@@ -61,37 +71,35 @@ jobs:
             mingw-w64-x86_64-libadwaita
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-poppler
-            mingw-w64-x86_64-make
+            make
+            zip
 
       - name: Build
+        shell: msys2 {0}
         run: |
           make
           mkdir -p dist
           cp cuali-gtk.exe dist/
-          cp /c/msys64/mingw64/bin/libgtk-4-0.dll dist/
-          cp /c/msys64/mingw64/bin/libadwaita-1-0.dll dist/
-          cp /c/msys64/mingw64/bin/libglib-2.0-0.dll dist/
-          cp /c/msys64/mingw64/bin/libgobject-2.0-0.dll dist/
-          cp /c/msys64/mingw64/bin/libgio-2.0-0.dll dist/
-          cp /c/msys64/mingw64/bin/libpango-1.0-0.dll dist/
-          cp /c/msys64/mingw64/bin/libpangocairo-1.0-0.dll dist/
-          cp /c/msys64/mingw64/bin/libcairo-2.dll dist/
-          cp /c/msys64/mingw64/bin/libsqlite3-0.dll dist/
-          cp /c/msys64/mingw64/bin/libpoppler-glib-8.dll dist/
-          cp /c/msys64/mingw64/bin/libgraphene-1.0-0.dll dist/
-          cp /c/msys64/mingw64/bin/libgdk_pixbuf-2.0-0.dll dist/
-          cp /c/msys64/mingw64/bin/libharfbuzz-0.dll dist/
-          cp /c/msys64/mingw64/bin/libfreetype-6.dll dist/
-          cp /c/msys64/mingw64/bin/libfontconfig-1.dll dist/
-          cp /c/msys64/mingw64/bin/libintl-8.dll dist/
-          cp /c/msys64/mingw64/bin/libiconv-2.dll dist/
-          cp /c/msys64/mingw64/bin/libz-1.dll dist/
-          cp /c/msys64/mingw64/bin/libpng16-16.dll dist/
+          # Collect dependencies
+          ldd cuali-gtk.exe | grep '/mingw64/bin/' | awk '{print $3}' | xargs -I{} cp {} dist/
+          # Copy essential standard libraries
+          cp /mingw64/bin/libwinpthread-1.dll dist/ 2>/dev/null || true
+          cp /mingw64/bin/libgcc_s_seh-1.dll dist/ 2>/dev/null || true
+          cp /mingw64/bin/libstdc++-6.dll dist/ 2>/dev/null || true
+          
+          # Copy icons and other assets
+          mkdir -p dist/share/icons/hicolor/scalable/apps
+          cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg dist/share/icons/hicolor/scalable/apps/
+          
+          # Compile schemas (some GTK features need them)
+          mkdir -p dist/share/glib-2.0/schemas
+          cp /mingw64/share/glib-2.0/schemas/*.xml dist/share/glib-2.0/schemas/ 2>/dev/null || true
+          glib-compile-schemas dist/share/glib-2.0/schemas/
 
       - name: Create zip
+        shell: msys2 {0}
         run: |
-          cd dist
-          7z a ../Cuali-windows.zip *
+          zip -r Cuali-windows.zip dist/*
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
