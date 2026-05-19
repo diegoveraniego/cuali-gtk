@@ -84,6 +84,7 @@ html_to_plain (int html_offset, int *map, int len)
 }
 
 static void refresh_documents (CualiAppState *state);
+static void populate_recent_list (CualiAppState *state);
 static void refresh_results (CualiAppState *state);
 static void refresh_tags (CualiAppState *state);
 static void update_status_bar (CualiAppState *state);
@@ -200,14 +201,12 @@ load_document (CualiAppState *state, int document_id, const char *name, const ch
   double scroll_pos = adj ? gtk_adjustment_get_value (adj) : 0;
 
   /* set_text is irreversible and clears history, cannot be inside user_action */
-  gtk_text_buffer_set_text (buffer, "", 0);
-  
-  gtk_text_buffer_begin_user_action (buffer);
-  
   if (state->offset_map) g_free (state->offset_map);
   char *clean_text = map_html (contents, &state->offset_map, &state->plain_text_len);
   
   gtk_text_buffer_set_text (buffer, clean_text ? clean_text : "", -1);
+  
+  gtk_text_buffer_begin_user_action (buffer);
   
   sqlite3_stmt *stmt = db_highlights_get_for_document (document_id);
   if (stmt) {
@@ -1542,12 +1541,20 @@ on_window_close_request (GtkWindow *window, gpointer user_data)
 }
 
 static void
+on_back_to_welcome_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    adw_view_stack_set_visible_child_name (ADW_VIEW_STACK (state->root_stack), "welcome");
+    populate_recent_list (state);
+}
+
+static void
 on_about_clicked (GtkButton *button, gpointer user_data)
 {
     CualiAppState *state = (CualiAppState *)user_data;
     const char *developers[] = { "Diego", NULL };
     
-    adw_show_about_window (GTK_WINDOW (state->window),
+    adw_show_about_dialog (state->window,
                           "application-name", "Cuali",
                           "application-icon", "org.cuali.CualiGTK",
                           "version", "1.0",
@@ -1570,7 +1577,9 @@ on_edit_toggle_clicked (GtkButton *button, gpointer user_data)
   if (state->is_editing) {
     gtk_text_view_set_editable (GTK_TEXT_VIEW (state->text_view), TRUE);
     gtk_button_set_icon_name (GTK_BUTTON (state->edit_toggle), "document-save-symbolic");
-    gtk_text_buffer_remove_tag_by_name (buffer, "highlight", NULL, NULL);
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds (buffer, &start, &end);
+    gtk_text_buffer_remove_tag_by_name (buffer, "highlight", &start, &end);
     if (state->save_btn) gtk_widget_set_visible (state->save_btn, TRUE);
     auto_save_start (state);
     adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
@@ -2462,8 +2471,7 @@ void window_init(GtkApplication *app) {
     GtkWidget *back_btn = gtk_button_new_from_icon_name ("go-previous-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), back_btn);
     gtk_widget_set_tooltip_text (back_btn, "Go back to welcome screen");
-    g_signal_connect_swapped (back_btn, "clicked", G_CALLBACK (adw_view_stack_set_visible_child_name), state->root_stack);
-    g_signal_connect_swapped (back_btn, "clicked", G_CALLBACK (populate_recent_list), state);
+    g_signal_connect (back_btn, "clicked", G_CALLBACK (on_back_to_welcome_clicked), state);
 
     GtkWidget *open_button = gtk_button_new_from_icon_name ("folder-open-symbolic");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), open_button);
