@@ -2507,12 +2507,6 @@ void window_init(GtkApplication *app) {
     gtk_popover_set_autohide(GTK_POPOVER(menu_popover), TRUE);
     GtkWidget *menu_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
-    GtkWidget *import_item = gtk_button_new_with_label ("Import document…");
-    gtk_widget_set_halign (import_item, GTK_ALIGN_START);
-    gtk_widget_set_tooltip_text (import_item, "Import a file into the project");
-    g_signal_connect (import_item, "clicked", G_CALLBACK (on_add_button_clicked), state);
-    gtk_box_append (GTK_BOX (menu_box), import_item);
-
     GtkWidget *about_item = gtk_button_new_with_label ("About Cuali");
     gtk_widget_set_halign (about_item, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text (about_item, "View application information");
