@@ -28,6 +28,7 @@ typedef struct {
     GtkWidget *popover_tag_list;
     GtkWidget *popover_delete_btn;
     GtkWidget *popover_memo_view;   /* GtkTextView for researcher memos */
+    GtkWidget *highlight_selector;  /* Popover for overlapping highlights */
     int active_highlight_id;
     int pending_start;
     int pending_end;

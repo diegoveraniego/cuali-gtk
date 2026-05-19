@@ -13,7 +13,7 @@ const char *style_css =
   ".tag-badge { background-color: @accent_bg_color; color: white; border-radius: 6px; padding: 2px 10px; font-size: 0.85rem; font-weight: 600; }"
   ".tag-count-badge { background-color: rgba(0,0,0,0.1); border-radius: 12px; padding: 1px 8px; font-size: 0.8rem; margin-right: 8px; }"
   ".result-card { background-color: @view_bg_color; border-radius: 12px; padding: 20px; border: 1px solid rgba(0,0,0,0.05); margin-bottom: 12px; }"
-  ".result-snippet { font-style: italic; font-family: serif; font-size: 1.1rem; line-height: 1.6; margin-bottom: 12px; }"
+  ".result-snippet { font-style: italic; font-size: 1.1rem; line-height: 1.6; margin-bottom: 12px; }"
   ".result-meta { font-size: 0.85rem; opacity: 0.6; margin-top: 8px; }";
 
 static char*
@@ -751,12 +751,14 @@ static void build_highlight_popover(CualiAppState *state)
     gtk_popover_set_has_arrow(GTK_POPOVER(state->highlight_popover), TRUE);
 
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_size_request(box, 340, -1);  /* min width */
+    gtk_widget_set_size_request(box, 260, -1);  /* min width */
     
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 300);
+    gtk_scrolled_window_set_max_content_width(GTK_SCROLLED_WINDOW(scroll), 320);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
-    gtk_scrolled_window_set_propagate_natural_width(GTK_SCROLLED_WINDOW(scroll), TRUE);
+    gtk_scrolled_window_set_propagate_natural_width(GTK_SCROLLED_WINDOW(scroll), FALSE);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
     
     state->popover_tag_list = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->popover_tag_list), GTK_SELECTION_NONE);
@@ -808,10 +810,117 @@ static void build_highlight_popover(CualiAppState *state)
 }
 
 static void
+on_selector_row_activated (GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!row) return;
+    
+    int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (row), "hl-id"));
+    gtk_popover_popdown (GTK_POPOVER (state->highlight_selector));
+    
+    if (hl_id > 0) {
+        show_popover_at (state, hl_id);
+    }
+}
+
+static void
+show_highlight_selector (CualiAppState *state, GSList *hl_ids, int x, int y)
+{
+    GtkWidget *scroll = gtk_popover_get_child (GTK_POPOVER (state->highlight_selector));
+    if (!GTK_IS_SCROLLED_WINDOW (scroll)) return;
+    GtkWidget *list = gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (scroll));
+    if (!GTK_IS_LIST_BOX (list)) return;
+    
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child (list)) != NULL)
+        gtk_list_box_remove (GTK_LIST_BOX (list), child);
+    
+    for (GSList *l = hl_ids; l; l = l->next) {
+        int hl_id = GPOINTER_TO_INT (l->data);
+        
+        char *tag_path = NULL;
+        char *tag_color = NULL;
+        sqlite3_stmt *stmt = db_tags_get_for_highlight (hl_id);
+        if (stmt) {
+            if (sqlite3_step (stmt) == SQLITE_ROW) {
+                tag_path = g_strdup ((const char *)sqlite3_column_text (stmt, 1));
+                tag_color = g_strdup ((const char *)sqlite3_column_text (stmt, 2));
+            }
+            sqlite3_finalize (stmt);
+        }
+        if (!tag_path) tag_path = g_strdup ("Unknown");
+        if (!tag_color) tag_color = g_strdup ("#77767b");
+        
+        GtkWidget *row = gtk_list_box_row_new ();
+        GtkWidget *hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
+        gtk_widget_set_margin_start (hbox, 10);
+        gtk_widget_set_margin_end (hbox, 10);
+        gtk_widget_set_margin_top (hbox, 6);
+        gtk_widget_set_margin_bottom (hbox, 6);
+        
+        GtkWidget *dot = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+        gtk_widget_set_size_request (dot, 12, 12);
+        char *css = g_strdup_printf ("box { background-color: %s; border-radius: 6px; }", tag_color);
+        GtkCssProvider *provider = gtk_css_provider_new ();
+        gtk_css_provider_load_from_string (provider, css);
+        gtk_style_context_add_provider (gtk_widget_get_style_context (dot),
+                                        GTK_STYLE_PROVIDER (provider),
+                                        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        g_object_unref (provider);
+        g_free (css);
+        gtk_widget_set_valign (dot, GTK_ALIGN_CENTER);
+        gtk_box_append (GTK_BOX (hbox), dot);
+        
+        GtkWidget *label = gtk_label_new (tag_path);
+        gtk_widget_set_halign (label, GTK_ALIGN_START);
+        gtk_widget_set_hexpand (label, TRUE);
+        gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+        gtk_box_append (GTK_BOX (hbox), label);
+        
+        gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), hbox);
+        g_object_set_data (G_OBJECT (row), "hl-id", GINT_TO_POINTER (hl_id));
+        gtk_list_box_append (GTK_LIST_BOX (list), row);
+        
+        g_free (tag_path);
+        g_free (tag_color);
+    }
+    
+    GdkRectangle rect = { x - 8, y - 8, 16, 16 };
+    gtk_popover_set_pointing_to (GTK_POPOVER (state->highlight_selector), &rect);
+    gtk_popover_popup (GTK_POPOVER (state->highlight_selector));
+}
+
+static void
+build_highlight_selector (CualiAppState *state)
+{
+    state->highlight_selector = gtk_popover_new ();
+    gtk_widget_set_parent (state->highlight_selector, state->text_view);
+    gtk_popover_set_position (GTK_POPOVER (state->highlight_selector), GTK_POS_BOTTOM);
+    gtk_popover_set_autohide (GTK_POPOVER (state->highlight_selector), TRUE);
+    gtk_popover_set_has_arrow (GTK_POPOVER (state->highlight_selector), TRUE);
+    gtk_widget_set_size_request (state->highlight_selector, 280, -1);
+    
+    GtkWidget *scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_max_content_height (GTK_SCROLLED_WINDOW (scroll), 250);
+    gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW (scroll), TRUE);
+    
+    GtkWidget *list = gtk_list_box_new ();
+    gtk_list_box_set_selection_mode (GTK_LIST_BOX (list), GTK_SELECTION_NONE);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), list);
+    
+    g_signal_connect (list, "row-activated", G_CALLBACK (on_selector_row_activated), state);
+    
+    gtk_popover_set_child (GTK_POPOVER (state->highlight_selector), scroll);
+}
+
+static void
 on_text_view_realized (GtkWidget *widget, gpointer user_data)
 {
     build_highlight_popover((CualiAppState *)user_data);
+    build_highlight_selector((CualiAppState *)user_data);
 }
+
+static void show_highlight_selector(CualiAppState *state, GSList *hl_ids, int x, int y);
 
 static void
 on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
@@ -827,14 +936,38 @@ on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, double y,
     gtk_text_view_get_iter_at_location (view, &iter, buffer_x, buffer_y);
     
     GSList *tags = gtk_text_iter_get_tags (&iter);
+    GSList *hl_ids = NULL;
+    int count = 0;
     for (GSList *l = tags; l; l = l->next) {
         int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (l->data), "highlight-id"));
         if (hl_id > 0) {
-            show_popover_at(state, hl_id);
-            break;
+            hl_ids = g_slist_append(hl_ids, GINT_TO_POINTER(hl_id));
+            count++;
         }
     }
     g_slist_free (tags);
+    
+    if (count == 0) return;
+    
+    GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (gtk_widget_get_ancestor (state->text_view, GTK_TYPE_SCROLLED_WINDOW)));
+    double scroll_pos = adj ? gtk_adjustment_get_value (adj) : 0;
+    
+    if (count == 1) {
+        show_popover_at(state, GPOINTER_TO_INT(hl_ids->data));
+    } else {
+        show_highlight_selector(state, hl_ids, (int)x, (int)y);
+    }
+    
+    if (adj) {
+        gtk_adjustment_set_value (adj, scroll_pos);
+        ScrollRestoreData *data = g_new0 (ScrollRestoreData, 1);
+        data->state = state;
+        data->scroll_pos = scroll_pos;
+        data->offset = -1;
+        g_idle_add (restore_scroll_idle, data);
+    }
+    
+    g_slist_free (hl_ids);
 }
 
 static void
