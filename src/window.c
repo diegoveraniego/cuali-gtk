@@ -14,8 +14,7 @@ const char *style_css =
   ".tag-count-badge { background-color: rgba(0,0,0,0.1); border-radius: 12px; padding: 1px 8px; font-size: 0.8rem; margin-right: 8px; }"
   ".result-card { background-color: @view_bg_color; border-radius: 12px; padding: 20px; border: 1px solid rgba(0,0,0,0.05); margin-bottom: 12px; }"
   ".result-snippet { font-style: italic; font-size: 1.1rem; line-height: 1.6; margin-bottom: 12px; }"
-  ".result-meta { font-size: 0.85rem; opacity: 0.6; margin-top: 8px; }"
-  ".memo-box { border-radius: 10px; border: 1px solid alpha(@card_fg_color, 0.15); background-color: @card_bg_color; overflow: hidden; }";
+  ".result-meta { font-size: 0.85rem; opacity: 0.6; margin-top: 8px; }";
 
 static char*
 map_html (const char *html, int **out_map, int *out_len)
@@ -556,13 +555,8 @@ show_tag_dialog (CualiAppState *state, int highlight_id)
 
     /* Memo */
     gtk_box_append(GTK_BOX(content_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-    GtkWidget *memo_label = gtk_label_new("Memo");
-    gtk_widget_add_css_class(memo_label, "sidebar-title");
-    gtk_widget_set_halign(memo_label, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(content_box), memo_label);
 
     GtkWidget *memo_scroll = gtk_scrolled_window_new();
-    gtk_widget_add_css_class(memo_scroll, "memo-box");
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 80);
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 160);
     
@@ -853,15 +847,7 @@ static void build_highlight_dialog(CualiAppState *state)
     GtkWidget *memo_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append(GTK_BOX(box), memo_sep);
 
-    GtkWidget *memo_label = gtk_label_new("Memo");
-    gtk_widget_add_css_class(memo_label, "sidebar-title");
-    gtk_widget_set_halign(memo_label, GTK_ALIGN_START);
-    gtk_widget_set_margin_start(memo_label, 10);
-    gtk_widget_set_margin_top(memo_label, 6);
-    gtk_box_append(GTK_BOX(box), memo_label);
-
     GtkWidget *memo_scroll = gtk_scrolled_window_new();
-    gtk_widget_add_css_class(memo_scroll, "memo-box");
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 80);
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(memo_scroll), 160);
     gtk_widget_set_margin_start(memo_scroll, 8);
@@ -2449,6 +2435,7 @@ void window_init(GtkApplication *app) {
     
     GtkWidget *recent_scroll = gtk_scrolled_window_new ();
     gtk_widget_set_size_request (recent_scroll, 400, 200);
+    gtk_widget_set_halign (recent_scroll, GTK_ALIGN_CENTER);
     gtk_box_append (GTK_BOX (recent_box), recent_scroll);
 
     state->recent_list = gtk_list_box_new ();
