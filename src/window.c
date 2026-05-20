@@ -1593,9 +1593,70 @@ on_about_clicked (GtkButton *button, gpointer user_data)
                           "version", "1.0",
                           "copyright", "© 2026 Diego",
                           "license-type", GTK_LICENSE_LGPL_2_1,
+                          "developer-name", "Diego",
                           "developers", developers,
                           "website", "https://github.com/diegoveraniego/cuali-gtk",
+                          "comments", "A fast, native qualitative data analysis tool for the Linux desktop.",
                           NULL);
+}
+
+static void
+on_shortcuts_clicked (GtkButton *button, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    const char *ui_xml = 
+        "<interface>"
+        "  <object class=\"GtkShortcutsWindow\" id=\"shortcuts_window\">"
+        "    <property name=\"modal\">True</property>"
+        "    <property name=\"title\">Keyboard Shortcuts</property>"
+        "    <child>"
+        "      <object class=\"GtkShortcutsSection\">"
+        "        <property name=\"section-name\">editor</property>"
+        "        <property name=\"max-height\">10</property>"
+        "        <child>"
+        "          <object class=\"GtkShortcutsGroup\">"
+        "            <property name=\"title\">General</property>"
+        "            <child>"
+        "              <object class=\"GtkShortcutsShortcut\">"
+        "                <property name=\"title\">Save changes</property>"
+        "                <property name=\"accelerator\">&lt;ctrl&gt;S</property>"
+        "              </object>"
+        "            </child>"
+        "            <child>"
+        "              <object class=\"GtkShortcutsShortcut\">"
+        "                <property name=\"title\">Search</property>"
+        "                <property name=\"accelerator\">&lt;ctrl&gt;F</property>"
+        "              </object>"
+        "            </child>"
+        "          </object>"
+        "        </child>"
+        "        <child>"
+        "          <object class=\"GtkShortcutsGroup\">"
+        "            <property name=\"title\">Highlights &amp; Tags</property>"
+        "            <child>"
+        "              <object class=\"GtkShortcutsShortcut\">"
+        "                <property name=\"title\">Toggle edit mode</property>"
+        "                <property name=\"accelerator\">&lt;ctrl&gt;E</property>"
+        "              </object>"
+        "            </child>"
+        "            <child>"
+        "              <object class=\"GtkShortcutsShortcut\">"
+        "                <property name=\"title\">Create highlight</property>"
+        "                <property name=\"accelerator\">&lt;ctrl&gt;B</property>"
+        "              </object>"
+        "            </child>"
+        "          </object>"
+        "        </child>"
+        "      </object>"
+        "    </child>"
+        "  </object>"
+        "</interface>";
+
+    GtkBuilder *builder = gtk_builder_new_from_string (ui_xml, -1);
+    GtkWindow *shortcuts_window = GTK_WINDOW (gtk_builder_get_object (builder, "shortcuts_window"));
+    gtk_window_set_transient_for (shortcuts_window, GTK_WINDOW (state->window));
+    gtk_window_present (shortcuts_window);
+    g_object_unref (builder);
 }
 
 static void
@@ -2564,6 +2625,13 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_tooltip_text (about_item, "View application information");
     g_signal_connect (about_item, "clicked", G_CALLBACK (on_about_clicked), state);
     gtk_box_append (GTK_BOX (menu_box), about_item);
+
+    GtkWidget *shortcuts_item = gtk_button_new_with_label ("Keyboard Shortcuts");
+    gtk_widget_set_halign (shortcuts_item, GTK_ALIGN_START);
+    gtk_widget_add_css_class(shortcuts_item, "flat");
+    gtk_widget_set_tooltip_text (shortcuts_item, "View keyboard shortcuts");
+    g_signal_connect (shortcuts_item, "clicked", G_CALLBACK (on_shortcuts_clicked), state);
+    gtk_box_append (GTK_BOX (menu_box), shortcuts_item);
 
     GtkWidget *clear_tags_item = gtk_button_new_with_label ("Clear all highlights & tags");
     gtk_widget_set_halign (clear_tags_item, GTK_ALIGN_START);
