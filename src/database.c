@@ -626,3 +626,23 @@ bool db_project_update_info(int project_id, const char *name, const char *descri
 const char *db_get_path(void) {
     return current_db_path;
 }
+
+sqlite3_stmt* db_tags_get_cooccurrence(int project_id) {
+    if (!db) return NULL;
+    const char *sql = 
+        "SELECT a.tag_id, b.tag_id, COUNT(*) as weight "
+        "FROM highlight_tags a "
+        "JOIN highlight_tags b ON a.highlight_id = b.highlight_id AND a.tag_id < b.tag_id "
+        "JOIN tags ta ON a.tag_id = ta.id "
+        "JOIN tags tb ON b.tag_id = tb.id "
+        "WHERE ta.project_id = ? "
+        "GROUP BY a.tag_id, b.tag_id;";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare cooccurrence statement: %s\n", sqlite3_errmsg(db));
+        return NULL;
+    }
+    sqlite3_bind_int(stmt, 1, project_id);
+    return stmt;
+}

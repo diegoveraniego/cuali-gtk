@@ -5,19 +5,17 @@
 #include <sqlite3.h>
 #include <string.h>
 #include <math.h>
-#include <fontconfig/fontconfig.h>
 
 const char *style_css = 
-  "* { font-family: \"Inter\", sans-serif; }"
-  "textview { font-family: \"Inter\", sans-serif; font-size: 11pt; font-weight: 400; letter-spacing: 0.01em; }"
-  "label { font-family: \"Inter\", sans-serif; }"
-  "textview.vim-visual > text > selection { background-color: #89b4fa; color: #1e1e2e; }"
+  "* { font-family: \"Cantarell\", sans-serif; }"
+  "textview { font-family: \"Cantarell\", sans-serif; font-size: 11pt; font-weight: 400; letter-spacing: 0.01em; }"
+  "label { font-family: \"Cantarell\", sans-serif; }"
+  "textview.vim-visual > text > selection { background-color: @theme_fg_color; color: @theme_bg_color; }"
   "textview > text > selection { background-color: #3584e4; color: #ffffff; }"
   "textview.vim-normal > text { caret-color: transparent; }"
   "textview.vim-visual > text { caret-color: transparent; }"
-  ".heading { font-family: \"Inter\", sans-serif; font-weight: 500; }"
-  ".vim-normal-badge { background-color: #89b4fa; color: #1e1e2e; font-family: \"Inter\", monospace; font-weight: 700; font-size: 10pt; padding: 2px 8px; border-radius: 4px; }"
-  ".vim-visual-badge { background-color: #a6e3a1; color: #1e1e2e; font-family: \"Inter\", monospace; font-weight: 700; font-size: 10pt; padding: 2px 8px; border-radius: 4px; }"
+  ".heading { font-family: \"Cantarell\", sans-serif; font-weight: 500; }"
+  ".vim-badge { background-color: @accent_bg_color; color: @accent_fg_color; font-family: \"Cantarell\", monospace; font-weight: 700; font-size: 10pt; padding: 2px 8px; border-radius: 4px; }"
   ".sidebar-list { background-color: transparent; }"
   ".sidebar-title { font-weight: bold; opacity: 0.5; font-size: 0.8rem; margin-top: 18px; margin-bottom: 6px; margin-left: 12px; }"
   ".document-view { background-color: @window_bg_color; border-radius: 12px; }"
@@ -2180,6 +2178,9 @@ refresh_documents (CualiAppState *state)
   while ((child = gtk_widget_get_first_child (state->doc_list)) != NULL)
     gtk_list_box_remove (GTK_LIST_BOX (state->doc_list), child);
 
+  GtkListBoxRow *row_to_select = NULL;
+  GtkListBoxRow *first_row = NULL;
+
   sqlite3_stmt *stmt = db_documents_get_all (state->current_project_id);
   if (stmt) {
     while (sqlite3_step (stmt) == SQLITE_ROW) {
@@ -2211,10 +2212,21 @@ refresh_documents (CualiAppState *state)
       g_object_set_data_full (G_OBJECT (row), "doc-contents", g_strdup (contents), g_free);
       g_object_set_data_full (G_OBJECT (row), "doc-name", g_strdup (name), g_free);
       gtk_list_box_append (GTK_LIST_BOX (state->doc_list), row);
+
+      if (!first_row) first_row = GTK_LIST_BOX_ROW (row);
+      if (id == state->last_document_id) row_to_select = GTK_LIST_BOX_ROW (row);
     }
     sqlite3_finalize (stmt);
   }
+
+  if (row_to_select) {
+      gtk_list_box_select_row(GTK_LIST_BOX(state->doc_list), row_to_select);
+  } else if (first_row) {
+      gtk_list_box_select_row(GTK_LIST_BOX(state->doc_list), first_row);
+  }
 }
+
+static void add_to_recent (const char *path, int doc_id);
 
 static void
 on_doc_row_selected (GtkListBox    *listbox,
@@ -2227,7 +2239,12 @@ on_doc_row_selected (GtkListBox    *listbox,
   const char *name = g_object_get_data (G_OBJECT (row), "doc-name");
   const char *contents = g_object_get_data (G_OBJECT (row), "doc-contents");
   load_document (state, id, name, contents);
+  state->last_document_id = id;
+  if (db_get_path()) {
+      add_to_recent (db_get_path(), id);
+  }
 }
+
 
 static void
 refresh_all (CualiAppState *state)
@@ -2250,24 +2267,31 @@ get_recent_file_path ()
 }
 
 static void
-add_to_recent (const char *path)
+add_to_recent (const char *path, int doc_id)
 {
     if (!path) return;
     char *recent_file = get_recent_file_path ();
     GList *lines = NULL;
     char *contents = NULL;
     
+    char *new_entry = g_strdup_printf("%s|%d", path, doc_id);
+    
     if (g_file_get_contents (recent_file, &contents, NULL, NULL)) {
         char **split = g_strsplit (contents, "\n", -1);
         for (int i = 0; split[i]; i++) {
-            if (strlen(split[i]) > 0 && g_strcmp0 (split[i], path) != 0)
-                lines = g_list_append (lines, g_strdup (split[i]));
+            if (strlen(split[i]) > 0) {
+                char **parts = g_strsplit (split[i], "|", 2);
+                if (parts[0] && g_strcmp0 (parts[0], path) != 0) {
+                    lines = g_list_append (lines, g_strdup (split[i]));
+                }
+                g_strfreev(parts);
+            }
         }
         g_strfreev (split);
         g_free (contents);
     }
     
-    lines = g_list_prepend (lines, g_strdup (path));
+    lines = g_list_prepend (lines, new_entry);
     
     GString *new_contents = g_string_new ("");
     int count = 0;
@@ -2282,7 +2306,7 @@ add_to_recent (const char *path)
     g_free (recent_file);
 }
 
-static void open_project_at_path (CualiAppState *state, const char *path);
+static void open_project_at_path (CualiAppState *state, const char *path, int doc_id);
 
 static void
 on_recent_row_selected (GtkListBox *listbox, GtkListBoxRow *row, gpointer user_data)
@@ -2290,7 +2314,8 @@ on_recent_row_selected (GtkListBox *listbox, GtkListBoxRow *row, gpointer user_d
     if (!row) return;
     CualiAppState *state = (CualiAppState *)user_data;
     const char *path = g_object_get_data (G_OBJECT (row), "project-path");
-    open_project_at_path (state, path);
+    int doc_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (row), "last-doc-id"));
+    open_project_at_path (state, path, doc_id);
 }
 
 static void
@@ -2307,7 +2332,12 @@ populate_recent_list (CualiAppState *state)
         bool empty = true;
         for (int i = 0; split[i]; i++) {
             if (strlen(split[i]) == 0) continue;
-            if (!g_file_test (split[i], G_FILE_TEST_EXISTS)) continue;
+            
+            char **parts = g_strsplit (split[i], "|", 2);
+            if (!parts[0] || !g_file_test (parts[0], G_FILE_TEST_EXISTS)) {
+                g_strfreev(parts);
+                continue;
+            }
             
             empty = false;
             GtkWidget *row = gtk_list_box_row_new ();
@@ -2320,15 +2350,19 @@ populate_recent_list (CualiAppState *state)
             GtkWidget *icon = gtk_image_new_from_icon_name ("document-open-symbolic");
             gtk_box_append (GTK_BOX (box), icon);
             
-            char *basename = g_path_get_basename (split[i]);
+            char *basename = g_path_get_basename (parts[0]);
             GtkWidget *label = gtk_label_new (basename);
             gtk_widget_set_halign (label, GTK_ALIGN_START);
             gtk_box_append (GTK_BOX (box), label);
             g_free (basename);
             
             gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), box);
-            g_object_set_data_full (G_OBJECT (row), "project-path", g_strdup (split[i]), g_free);
+            g_object_set_data_full (G_OBJECT (row), "project-path", g_strdup (parts[0]), g_free);
+            int doc_id = parts[1] ? atoi(parts[1]) : -1;
+            g_object_set_data (G_OBJECT (row), "last-doc-id", GINT_TO_POINTER (doc_id));
             gtk_list_box_append (GTK_LIST_BOX (state->recent_list), row);
+            
+            g_strfreev(parts);
         }
         g_strfreev (split);
         g_free (contents);
@@ -2341,15 +2375,16 @@ populate_recent_list (CualiAppState *state)
 }
 
 static void
-open_project_at_path (CualiAppState *state, const char *path)
+open_project_at_path (CualiAppState *state, const char *path, int doc_id)
 {
     if (db_init (path)) {
       state->current_project_id = db_project_get_first_id ();
+      state->last_document_id = doc_id;
       state->current_document_id = -1;
       gtk_text_buffer_set_text (gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->text_view)), "", -1);
       refresh_all (state);
       adw_view_stack_set_visible_child_name (ADW_VIEW_STACK (state->root_stack), "main");
-      add_to_recent (path);
+      add_to_recent (path, doc_id);
     } else {
         g_printerr("Failed to initialize database at %s\n", path);
     }
@@ -2428,7 +2463,7 @@ on_project_created (GObject *source_object, GAsyncResult *res, gpointer user_dat
     char *path = g_file_get_path (file);
     if (db_init (path)) {
       db_project_add ("Nuevo Proyecto", "");
-      open_project_at_path (state, path);
+      open_project_at_path (state, path, -1);
     }
     g_free (path);
     g_object_unref (file);
@@ -2451,7 +2486,7 @@ on_project_opened (GObject *source_object, GAsyncResult *res, gpointer user_data
   GFile *file = gtk_file_dialog_open_finish (dialog, res, NULL);
   if (file != NULL) {
     char *path = g_file_get_path (file);
-    open_project_at_path (state, path);
+    open_project_at_path (state, path, -1);
     g_free (path);
     g_object_unref (file);
   }
@@ -2488,14 +2523,11 @@ static void update_vim_status(CualiAppState *state) {
         return;
     }
     gtk_widget_set_visible(state->vim_mode_label, TRUE);
+    gtk_widget_add_css_class(state->vim_mode_label, "vim-badge");
     if (state->vim_mode == VIM_NORMAL) {
         gtk_label_set_text(GTK_LABEL(state->vim_mode_label), " NORMAL ");
-        gtk_widget_remove_css_class(state->vim_mode_label, "vim-visual-badge");
-        gtk_widget_add_css_class(state->vim_mode_label, "vim-normal-badge");
     } else {
         gtk_label_set_text(GTK_LABEL(state->vim_mode_label), " VISUAL ");
-        gtk_widget_remove_css_class(state->vim_mode_label, "vim-normal-badge");
-        gtk_widget_add_css_class(state->vim_mode_label, "vim-visual-badge");
     }
 }
 static void on_cursor_moved(GtkTextBuffer *buffer, GtkTextIter *iter,
@@ -2529,7 +2561,7 @@ draw_vim_cursor(GtkDrawingArea *area, cairo_t *cr,
     
     PangoLayout *layout = gtk_widget_create_pango_layout(state->text_view, NULL);
     
-    PangoFontDescription *desc = pango_font_description_from_string("Inter");
+    PangoFontDescription *desc = pango_font_description_from_string("Cantarell");
     pango_font_description_set_size(desc, 12.0 * state->zoom_level * PANGO_SCALE);
     pango_layout_set_font_description(layout, desc);
     pango_font_description_free(desc);
@@ -2542,17 +2574,23 @@ draw_vim_cursor(GtkDrawingArea *area, cairo_t *cr,
         pango_layout_set_text(layout, buf, -1);
     }
 
-    if (state->vim_mode == VIM_NORMAL) {
-        cairo_set_source_rgba(cr, 0.537, 0.706, 0.980, 0.8); /* #89b4fa */
+    gboolean is_dark = adw_style_manager_get_dark(adw_style_manager_get_default());
+
+    if (is_dark) {
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0); /* White cursor */
     } else {
-        cairo_set_source_rgba(cr, 0.651, 0.890, 0.631, 0.8); /* #a6e3a1 */
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0); /* Black cursor */
     }
 
     cairo_rectangle(cr, wx, wy, char_width, iter_rect.height);
     cairo_fill(cr);
 
     if (buf[0] != '\0') {
-        cairo_set_source_rgba(cr, 0.118, 0.118, 0.180, 1.0); /* #1e1e2e */
+        if (is_dark) {
+            cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0); /* Black text */
+        } else {
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0); /* White text */
+        }
         
         // Offset by pixels_above_lines to perfectly align with GTK's text baseline
         int pixels_above = gtk_text_view_get_pixels_above_lines(GTK_TEXT_VIEW(state->text_view));
@@ -2655,6 +2693,49 @@ on_vim_key_pressed(GtkEventControllerKey *controller,
     
     GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(state->window));
     if (GTK_IS_EDITABLE(focus)) return GDK_EVENT_PROPAGATE;
+
+    /* \u2500\u2500 f/F/t/T: capture the target character \u2500\u2500 */
+    if (g_object_get_data(G_OBJECT(state->window), "vim-awaiting-find")) {
+        g_object_set_data(G_OBJECT(state->window), "vim-awaiting-find", NULL);
+        if (keyval < 0x20 || keyval > 0x10FFFF) return GDK_EVENT_STOP; /* skip non-printable */
+        gunichar target_ch = gdk_keyval_to_unicode(keyval);
+        if (!target_ch) return GDK_EVENT_STOP;
+        state->vim_find_char = target_ch;
+
+        GtkTextBuffer *fbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+        GtkTextMark *fmark = gtk_text_buffer_get_insert(fbuf);
+        GtkTextIter fiter;
+        gtk_text_buffer_get_iter_at_mark(fbuf, &fiter, fmark);
+
+        int find_repeat = (state->vim_count > 0) ? state->vim_count : 1;
+        state->vim_count = 0;
+
+        gchar needle[8] = {0};
+        g_unichar_to_utf8(target_ch, needle);
+
+        for (int r = 0; r < find_repeat; r++) {
+            GtkTextIter found;
+            if (state->vim_find_forward) {
+                GtkTextIter search = fiter; gtk_text_iter_forward_char(&search);
+                GtkTextIter end; gtk_text_buffer_get_end_iter(fbuf, &end);
+                if (gtk_text_iter_forward_search(&search, needle, GTK_TEXT_SEARCH_VISIBLE_ONLY, &found, NULL, &end)) {
+                    fiter = found;
+                    if (state->vim_find_till) gtk_text_iter_backward_char(&fiter);
+                }
+            } else {
+                GtkTextIter start; gtk_text_buffer_get_start_iter(fbuf, &start);
+                if (gtk_text_iter_backward_search(&fiter, needle, GTK_TEXT_SEARCH_VISIBLE_ONLY, &found, NULL, &start)) {
+                    fiter = found;
+                    if (state->vim_find_till) gtk_text_iter_forward_char(&fiter);
+                }
+            }
+        }
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(fbuf, "insert", &fiter);
+        else gtk_text_buffer_place_cursor(fbuf, &fiter);
+        ensure_cursor_visible(state);
+        update_vim_cursor(state);
+        return GDK_EVENT_STOP;
+    }
     
     // Interceptar Ctrl+B explícitamente y dejar pasar otros atajos globales
     if (mod & GDK_CONTROL_MASK) {
@@ -2675,49 +2756,63 @@ on_vim_key_pressed(GtkEventControllerKey *controller,
     gtk_text_buffer_get_iter_at_mark(buffer, &iter, mark);
 
     gboolean handled = TRUE;
-    
+
+    /* ── Numeric count accumulator ── */
+    if (keyval >= GDK_KEY_1 && keyval <= GDK_KEY_9 && state->vim_count == 0) {
+        state->vim_count = keyval - GDK_KEY_0;
+        return GDK_EVENT_STOP;
+    }
+    if (keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9 && state->vim_count > 0) {
+        state->vim_count = state->vim_count * 10 + (keyval - GDK_KEY_0);
+        return GDK_EVENT_STOP;
+    }
+    int repeat = (state->vim_count > 0) ? state->vim_count : 1;
+    state->vim_count = 0; /* consume */
+
     switch (keyval) {
     
     case GDK_KEY_w: {
-        gtk_text_iter_forward_word_end(&iter);
-        gtk_text_iter_forward_word_end(&iter);
-        gtk_text_iter_backward_word_start(&iter);
+        for (int i = 0; i < repeat; i++) {
+            gtk_text_iter_forward_word_end(&iter);
+            gtk_text_iter_forward_word_end(&iter);
+            gtk_text_iter_backward_word_start(&iter);
+        }
         if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
         else gtk_text_buffer_place_cursor(buffer, &iter);
         break;
     }
     case GDK_KEY_e: {
-        gtk_text_iter_forward_word_end(&iter);
+        for (int i = 0; i < repeat; i++) gtk_text_iter_forward_word_end(&iter);
         if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
         else gtk_text_buffer_place_cursor(buffer, &iter);
         break;
     }
     case GDK_KEY_b: {
-        gtk_text_iter_backward_word_start(&iter);
+        for (int i = 0; i < repeat; i++) gtk_text_iter_backward_word_start(&iter);
         if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
         else gtk_text_buffer_place_cursor(buffer, &iter);
         break;
     }
     case GDK_KEY_h: {
-        gtk_text_iter_backward_char(&iter);
+        for (int i = 0; i < repeat; i++) gtk_text_iter_backward_char(&iter);
         if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
         else gtk_text_buffer_place_cursor(buffer, &iter);
         break;
     }
     case GDK_KEY_l: {
-        gtk_text_iter_forward_char(&iter);
+        for (int i = 0; i < repeat; i++) gtk_text_iter_forward_char(&iter);
         if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
         else gtk_text_buffer_place_cursor(buffer, &iter);
         break;
     }
     case GDK_KEY_j: {
-        gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+        for (int i = 0; i < repeat; i++) gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
         if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
         else gtk_text_buffer_place_cursor(buffer, &iter);
         break;
     }
     case GDK_KEY_k: {
-        gtk_text_view_backward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+        for (int i = 0; i < repeat; i++) gtk_text_view_backward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
         if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
         else gtk_text_buffer_place_cursor(buffer, &iter);
         break;
@@ -2766,7 +2861,7 @@ on_vim_key_pressed(GtkEventControllerKey *controller,
     }
     case GDK_KEY_d: {
         if (mod & GDK_CONTROL_MASK) {
-            for (int i=0; i<15; i++) gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+            for (int i = 0; i < 15 * repeat; i++) gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
             if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
             else gtk_text_buffer_place_cursor(buffer, &iter);
         } else handled = FALSE;
@@ -2774,18 +2869,114 @@ on_vim_key_pressed(GtkEventControllerKey *controller,
     }
     case GDK_KEY_u: {
         if (mod & GDK_CONTROL_MASK) {
-            for (int i=0; i<15; i++) gtk_text_view_backward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+            for (int i = 0; i < 15 * repeat; i++) gtk_text_view_backward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
             if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
             else gtk_text_buffer_place_cursor(buffer, &iter);
         } else handled = FALSE;
         break;
     }
-    case GDK_KEY_f: {
+    case GDK_KEY_f:
+    case GDK_KEY_F:
+    case GDK_KEY_t:
+    case GDK_KEY_T: {
         if (mod & GDK_CONTROL_MASK) {
-            for (int i=0; i<30; i++) gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+            /* Ctrl+f = page down */
+            for (int i = 0; i < 30 * repeat; i++) gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+            if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+            else gtk_text_buffer_place_cursor(buffer, &iter);
+        } else {
+            /* f/F/t/T: wait for next char — store intent, consume event */
+            state->vim_find_forward = (keyval == GDK_KEY_f || keyval == GDK_KEY_t);
+            state->vim_find_till   = (keyval == GDK_KEY_t || keyval == GDK_KEY_T);
+            state->vim_find_char   = 0; /* signal: waiting for char */
+            /* We mark handled=FALSE so key propagates, but we need capture:
+               instead use a one-shot flag: next printable key is the target */
+            state->vim_count = repeat; /* reuse: carry repeat into find */
+            g_object_set_data(G_OBJECT(state->window), "vim-awaiting-find", GINT_TO_POINTER(1));
+            return GDK_EVENT_STOP;
+        }
+        break;
+    }
+    case GDK_KEY_semicolon: { /* ; = repeat last f/F/t/T */
+        if (state->vim_find_char != 0) {
+            GtkTextIter search = iter;
+            for (int r = 0; r < repeat; r++) {
+                GtkTextIter found;
+                gchar needle[8] = {0};
+                g_unichar_to_utf8(state->vim_find_char, needle);
+                if (state->vim_find_forward) {
+                    gtk_text_iter_forward_char(&search);
+                    GtkTextIter end; gtk_text_buffer_get_end_iter(buffer, &end);
+                    if (gtk_text_iter_forward_search(&search, needle, GTK_TEXT_SEARCH_VISIBLE_ONLY, &found, NULL, &end)) {
+                        search = found;
+                        if (state->vim_find_till && gtk_text_iter_backward_char(&search)) {}
+                    }
+                } else {
+                    GtkTextIter start; gtk_text_buffer_get_start_iter(buffer, &start);
+                    if (gtk_text_iter_backward_search(&search, needle, GTK_TEXT_SEARCH_VISIBLE_ONLY, &found, NULL, &start)) {
+                        search = found;
+                        if (state->vim_find_till) gtk_text_iter_forward_char(&search);
+                    }
+                }
+            }
+            iter = search;
             if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
             else gtk_text_buffer_place_cursor(buffer, &iter);
         } else handled = FALSE;
+        break;
+    }
+    case GDK_KEY_percent: { /* % = jump to matching bracket */
+        static const char open_brackets[]  = "({[";
+        static const char close_brackets[] = ")}]";
+        gunichar ch = gtk_text_iter_get_char(&iter);
+        char *open_pos  = strchr(open_brackets,  (char)ch);
+        char *close_pos = strchr(close_brackets, (char)ch);
+        if (open_pos) {
+            int idx = open_pos - open_brackets;
+            char open_c = open_brackets[idx], close_c = close_brackets[idx];
+            GtkTextIter search = iter; gtk_text_iter_forward_char(&search);
+            int depth = 1;
+            while (!gtk_text_iter_is_end(&search)) {
+                gunichar c = gtk_text_iter_get_char(&search);
+                if (c == (gunichar)open_c) depth++;
+                else if (c == (gunichar)close_c) { depth--; if (depth == 0) { iter = search; break; } }
+                gtk_text_iter_forward_char(&search);
+            }
+        } else if (close_pos) {
+            int idx = close_pos - close_brackets;
+            char open_c = open_brackets[idx], close_c = close_brackets[idx];
+            GtkTextIter search = iter; gtk_text_iter_backward_char(&search);
+            int depth = 1;
+            while (!gtk_text_iter_is_start(&search)) {
+                gunichar c = gtk_text_iter_get_char(&search);
+                if (c == (gunichar)close_c) depth++;
+                else if (c == (gunichar)open_c) { depth--; if (depth == 0) { iter = search; break; } }
+                gtk_text_iter_backward_char(&search);
+            }
+        } else handled = FALSE;
+        if (handled) {
+            if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+            else gtk_text_buffer_place_cursor(buffer, &iter);
+        }
+        break;
+    }
+    case GDK_KEY_z: {
+        guint32 now = gtk_event_controller_get_current_event_time(GTK_EVENT_CONTROLLER(controller));
+        if (now - state->last_z_time < 500) {
+            /* zz = center */
+            gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(state->text_view), mark, 0.0, TRUE, 0.5, 0.5);
+            state->last_z_time = 0;
+        } else {
+            state->last_z_time = now;
+            return GDK_EVENT_STOP;
+        }
+        break;
+    }
+    case GDK_KEY_Z: {
+        /* Shift+z pressed after z was stored? Use last_z_time trick differently.
+           Actually zb/zt come as separate chars; simplest: treat Z as zt and
+           use z+Return for zb via last_z_time. For simplicity: Z = center (zz). */
+        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(state->text_view), mark, 0.0, TRUE, 0.5, 0.0);
         break;
     }
     case GDK_KEY_braceleft: { // {
@@ -2878,34 +3069,7 @@ void window_init(GtkApplication *app) {
     state->zoom_level = 1.0;
     state->map_selected_tag_id = -1;
 
-    // Cargar Inter desde recursos
-    const char *font_paths[] = {
-        "/org/cuali/fonts/InterVariable.ttf",
-        NULL
-    };
-
-    for (int i = 0; font_paths[i]; i++) {
-        GBytes *font_data = g_resources_lookup_data(font_paths[i], 0, NULL);
-        if (font_data) {
-            gsize size;
-            const guint8 *data = g_bytes_get_data(font_data, &size);
-            
-            // Fontconfig no soporta cargar desde memoria directamente, extraemos a un archivo temporal
-            char *cache_dir = g_build_filename(g_get_user_cache_dir(), "cuali", NULL);
-            g_mkdir_with_parents(cache_dir, 0755);
-            char *tmp_font_path = g_build_filename(cache_dir, "InterVariable.ttf", NULL);
-            
-            if (!g_file_test(tmp_font_path, G_FILE_TEST_EXISTS)) {
-                g_file_set_contents(tmp_font_path, (const gchar *)data, size, NULL);
-            }
-            
-            FcConfigAppFontAddFile(FcConfigGetCurrent(), (const FcChar8 *)tmp_font_path);
-            
-            g_free(tmp_font_path);
-            g_free(cache_dir);
-            g_bytes_unref(font_data);
-        }
-    }
+    // Cantarell es fuente del sistema GNOME, no necesita carga personalizada
 
     GtkCssProvider *provider = gtk_css_provider_new ();
     gtk_css_provider_load_from_string (provider, style_css);
@@ -2913,6 +3077,10 @@ void window_init(GtkApplication *app) {
                                                GTK_STYLE_PROVIDER (provider),
                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref (provider);
+
+    /* Register bundled icons so AdwViewSwitcher can find them by name */
+    GtkIconTheme *icon_theme = gtk_icon_theme_get_for_display (gdk_display_get_default ());
+    gtk_icon_theme_add_resource_path (icon_theme, "/org/cuali/icons");
 
     GtkWidget *window = adw_application_window_new(app);
     state->window = window;
@@ -3011,6 +3179,7 @@ void window_init(GtkApplication *app) {
     
     GtkWidget *view_switcher = adw_view_switcher_new ();
     adw_view_switcher_set_stack (ADW_VIEW_SWITCHER (view_switcher), ADW_VIEW_STACK (state->view_stack));
+    adw_view_switcher_set_policy (ADW_VIEW_SWITCHER (view_switcher), ADW_VIEW_SWITCHER_POLICY_WIDE);
     adw_header_bar_set_title_widget (ADW_HEADER_BAR (header_bar), view_switcher);
 
     GtkWidget *hl_button = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/format-text-underline-symbolic.svg");

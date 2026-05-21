@@ -3,6 +3,11 @@
 
 #include <adwaita.h>
 
+typedef enum {
+    VIM_NORMAL,
+    VIM_VISUAL
+} VimMode;
+
 typedef struct {
     GtkWidget *text_view;
     GtkWidget *window;
@@ -34,6 +39,7 @@ typedef struct {
     int pending_end;
     double zoom_level;
     bool has_unsaved_changes;
+    bool is_loading_document;
     GtkWidget *save_btn;
 
     /* Busqueda en documento (Ctrl+F) */
@@ -52,6 +58,29 @@ typedef struct {
 
     /* Filtro de documentos */
     GtkWidget *doc_filter_entry;
+
+    /* Tag Map State */
+    GtkWidget *map_drawing_area;
+    int map_selected_tag_id;   /* -1 = ninguno */
+    double *map_node_x;
+    double *map_node_y;
+    int    *map_node_tag_id;
+    int     map_node_count;
+
+    /* Vim Mode */
+    gboolean vim_enabled;
+    VimMode  vim_mode;
+    guint32  last_g_time;
+    guint32  last_z_time;
+    int      vim_count;          /* digit accumulator for counts like 5j */
+    gchar    vim_find_char;      /* char to find with f/F/t/T */
+    gboolean vim_find_forward;   /* TRUE = f/t, FALSE = F/T */
+    gboolean vim_find_till;      /* TRUE = t/T (stop before), FALSE = f/F (land on) */
+    GtkWidget *vim_mode_label;
+    GtkWidget *vim_cursor_area;
+
+    /* Last active document per project (restored on reopen) */
+    int      last_document_id;
 } CualiAppState;
 
 void window_init(GtkApplication *app);

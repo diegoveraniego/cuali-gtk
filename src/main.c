@@ -6,6 +6,9 @@ static void
 activate (GtkApplication *app,
           gpointer        user_data)
 {
+  GtkIconTheme *theme = gtk_icon_theme_get_for_display (gdk_display_get_default ());
+  gtk_icon_theme_add_search_path (theme, "./icons");
+  gtk_icon_theme_add_resource_path (theme, "/org/cuali/icons");
   window_init(app);
 }
 
@@ -22,7 +25,7 @@ main (int    argc,
 {
   g_autoptr (AdwApplication) app = NULL;
 
-  app = adw_application_new ("org.cuali.CualiGTK", G_APPLICATION_DEFAULT_FLAGS);
+  app = adw_application_new ("org.cuali.CualiGTKDev", G_APPLICATION_DEFAULT_FLAGS);
 
   g_signal_connect (app, "activate", G_CALLBACK (activate), NULL);
   g_signal_connect (app, "shutdown", G_CALLBACK (shutdown), NULL);

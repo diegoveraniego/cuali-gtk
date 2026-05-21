@@ -41,6 +41,7 @@ bool db_highlight_get_offsets(int highlight_id, int *start, int *end);
 sqlite3_stmt* db_highlights_get_for_document(int document_id);
 
 sqlite3_stmt* db_results_get_all(int project_id);
+sqlite3_stmt* db_tags_get_cooccurrence(int project_id);
 
 bool db_is_open(void);
 

@@ -1,8 +1,8 @@
 CC = gcc
 CFLAGS = $(shell pkg-config --cflags libadwaita-1 poppler-glib sqlite3) -I./include
-LIBS = $(shell pkg-config --libs libadwaita-1 poppler-glib sqlite3)
+LIBS = $(shell pkg-config --libs libadwaita-1 poppler-glib sqlite3) -lm
 
-SRC = src/main.c src/database.c src/importer.c src/window.c
+SRC = src/main.c src/database.c src/importer.c src/window.c src/resources.c
 OBJ = $(SRC:.c=.o)
 TARGET = cuali-gtk
 
