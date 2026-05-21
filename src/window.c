@@ -4,8 +4,20 @@
 #include <stdio.h>
 #include <sqlite3.h>
 #include <string.h>
+#include <math.h>
+#include <fontconfig/fontconfig.h>
 
 const char *style_css = 
+  "* { font-family: \"Inter\", sans-serif; }"
+  "textview { font-family: \"Inter\", sans-serif; font-size: 11pt; font-weight: 400; letter-spacing: 0.01em; }"
+  "label { font-family: \"Inter\", sans-serif; }"
+  "textview.vim-visual > text > selection { background-color: #89b4fa; color: #1e1e2e; }"
+  "textview > text > selection { background-color: #3584e4; color: #ffffff; }"
+  "textview.vim-normal > text { caret-color: transparent; }"
+  "textview.vim-visual > text { caret-color: transparent; }"
+  ".heading { font-family: \"Inter\", sans-serif; font-weight: 500; }"
+  ".vim-normal-badge { background-color: #89b4fa; color: #1e1e2e; font-family: \"Inter\", monospace; font-weight: 700; font-size: 10pt; padding: 2px 8px; border-radius: 4px; }"
+  ".vim-visual-badge { background-color: #a6e3a1; color: #1e1e2e; font-family: \"Inter\", monospace; font-weight: 700; font-size: 10pt; padding: 2px 8px; border-radius: 4px; }"
   ".sidebar-list { background-color: transparent; }"
   ".sidebar-title { font-weight: bold; opacity: 0.5; font-size: 0.8rem; margin-top: 18px; margin-bottom: 6px; margin-left: 12px; }"
   ".document-view { background-color: @window_bg_color; border-radius: 12px; }"
@@ -15,6 +27,27 @@ const char *style_css =
   ".result-card { background-color: @view_bg_color; border-radius: 12px; padding: 20px; border: 1px solid rgba(0,0,0,0.05); margin-bottom: 12px; }"
   ".result-snippet { font-style: italic; font-size: 1.1rem; line-height: 1.6; margin-bottom: 12px; }"
   ".result-meta { font-size: 0.85rem; opacity: 0.6; margin-top: 8px; }";
+
+static void
+set_button_resource_icon (GtkWidget *btn, const char *resource_path)
+{
+    GFile *file = g_file_new_for_uri (resource_path);
+    GIcon *gicon = g_file_icon_new (file);
+    g_object_unref (file);
+
+    GtkWidget *img = gtk_image_new_from_gicon (gicon);
+    g_object_unref (gicon);
+
+    gtk_button_set_child (GTK_BUTTON (btn), img);
+}
+
+static GtkWidget *
+create_resource_icon_button (const char *resource_path)
+{
+    GtkWidget *btn = gtk_button_new ();
+    set_button_resource_icon (btn, resource_path);
+    return btn;
+}
 
 static char*
 map_html (const char *html, int **out_map, int *out_len)
@@ -267,6 +300,7 @@ on_results_tag_selected (GtkListBox *box, GtkListBoxRow *row, gpointer user_data
     
     gtk_list_box_invalidate_filter (GTK_LIST_BOX (state->results_list));
 }
+
 
 static void
 on_tag_search_changed (GtkEditable *editable, gpointer user_data)
@@ -758,35 +792,6 @@ static void on_highlight_dialog_closed (AdwDialog *dialog, gpointer user_data)
         g_free(memo);
     }
     
-    /* Save cursor and scroll position before focus grab */
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
-    GtkTextMark *mark = gtk_text_buffer_get_insert(buffer);
-    GtkTextIter cursor_iter;
-    gtk_text_buffer_get_iter_at_mark(buffer, &cursor_iter, mark);
-    int cursor_offset = gtk_text_iter_get_offset(&cursor_iter);
-    
-    GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (gtk_widget_get_ancestor (state->text_view, GTK_TYPE_SCROLLED_WINDOW)));
-    double scroll_pos = adj ? gtk_adjustment_get_value (adj) : 0;
-    
-    gtk_widget_grab_focus (state->text_view);
-    
-    /* Restore cursor position after focus grab */
-    if (cursor_offset >= 0) {
-        GtkTextIter restore_iter;
-        gtk_text_buffer_get_iter_at_offset(buffer, &restore_iter, cursor_offset);
-        gtk_text_buffer_place_cursor(buffer, &restore_iter);
-    }
-    
-    /* Restore scroll after focus grab might have triggered a jump */
-    if (adj) {
-        gtk_adjustment_set_value (adj, scroll_pos);
-        /* Double-check in next cycle */
-        ScrollRestoreData *data = g_new0 (ScrollRestoreData, 1);
-        data->state = state;
-        data->scroll_pos = scroll_pos;
-        data->offset = -1; /* Don't move cursor */
-        g_idle_add (restore_scroll_idle, data);
-    }
 }
 
 static void show_highlight_dialog_at(CualiAppState *state, int highlight_id)
@@ -1017,6 +1022,7 @@ on_text_view_realized (GtkWidget *widget, gpointer user_data)
 
 static void show_highlight_selector_dialog(CualiAppState *state, GSList *hl_ids, int x, int y);
 static void create_highlight_and_show_tags(CualiAppState *state);
+static void update_vim_cursor(CualiAppState *state);
 
 static void
 on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
@@ -1030,6 +1036,11 @@ on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, double y,
     
     gtk_text_view_window_to_buffer_coords (view, GTK_TEXT_WINDOW_WIDGET, (int)x, (int)y, &buffer_x, &buffer_y);
     gtk_text_view_get_iter_at_location (view, &iter, buffer_x, buffer_y);
+    gtk_text_buffer_place_cursor (gtk_text_view_get_buffer (view), &iter);
+    
+    if (state->vim_enabled && state->vim_mode == VIM_NORMAL) {
+        update_vim_cursor(state);
+    }
     
     GSList *tags = gtk_text_iter_get_tags (&iter);
     GSList *hl_ids = NULL;
@@ -1046,25 +1057,12 @@ on_text_view_clicked (GtkGestureClick *gesture, int n_press, double x, double y,
     if (count == 0) return;
     
     gtk_gesture_set_state (GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
-    
-    GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (gtk_widget_get_ancestor (state->text_view, GTK_TYPE_SCROLLED_WINDOW)));
-    double scroll_pos = adj ? gtk_adjustment_get_value (adj) : 0;
-    
     if (count == 1) {
         show_tag_dialog(state, GPOINTER_TO_INT(hl_ids->data));
     } else {
         show_highlight_selector_dialog(state, hl_ids, (int)x, (int)y);
     }
-    
-    if (adj) {
-        gtk_adjustment_set_value (adj, scroll_pos);
-        ScrollRestoreData *data = g_new0 (ScrollRestoreData, 1);
-        data->state = state;
-        data->scroll_pos = scroll_pos;
-        data->offset = -1;
-        g_idle_add (restore_scroll_idle, data);
-    }
-    
+
     g_slist_free (hl_ids);
 }
 
@@ -1113,7 +1111,6 @@ on_text_view_released (GtkGestureClick *gesture, int n_press, double x, double y
     
     g_free(text_before_start);
     g_free(text_before_end);
-                         
     create_highlight_and_show_tags(state);
 }
 
@@ -1147,7 +1144,7 @@ apply_highlight_tag (GtkTextBuffer *buffer, int hl_id, GtkTextIter *start, GtkTe
     g_object_set_data (G_OBJECT (tag), "highlight-id", GINT_TO_POINTER (hl_id));
     gtk_text_buffer_apply_tag (buffer, tag, start, end);
     
-    if (hex_color) g_free(hex_color);
+    g_free (hex_color);
 }
 
 static void
@@ -1978,6 +1975,7 @@ refresh_tags (CualiAppState *state)
     flatten_tag_tree (&root, 0, GTK_LIST_BOX (state->tag_list), state);
 
     g_list_free_full (root.children, (GDestroyNotify) tag_node_free);
+
 }
 
 static void
@@ -2048,6 +2046,7 @@ refresh_results (CualiAppState *state)
     sqlite3_finalize (stmt);
   }
   refresh_results_tags (state);
+
 }
 
 
@@ -2055,20 +2054,23 @@ refresh_results (CualiAppState *state)
 static void
 update_zoom (CualiAppState *state)
 {
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(buffer, &start, &end);
-    
-    // Remove old zoom tag if it exists
-    gtk_text_buffer_remove_tag_by_name(buffer, "zoom", &start, &end);
-    
     double font_size_pt = 12.0 * state->zoom_level;
     
-    GtkTextTag *tag = gtk_text_buffer_create_tag(buffer, "zoom",
-                                               "size-points", font_size_pt,
-                                               NULL);
+    char *css = g_strdup_printf(
+        "textview { font-size: %dpt; }",
+        (int)font_size_pt
+    );
     
-    gtk_text_buffer_apply_tag(buffer, tag, &start, &end);
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(provider, css);
+    g_free(css);
+    
+    gtk_style_context_add_provider(
+        gtk_widget_get_style_context(state->text_view),
+        GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION
+    );
+    g_object_unref(provider);
 }
 
 static void
@@ -2478,12 +2480,432 @@ on_view_stack_visible_child_changed (GObject *object, GParamSpec *pspec, gpointe
     const char *name = adw_view_stack_get_visible_child_name (ADW_VIEW_STACK (state->view_stack));
     if (g_strcmp0 (name, "results") == 0) refresh_results (state);
     if (g_strcmp0 (name, "info") == 0) refresh_project_info (state);
+
+}
+static void update_vim_status(CualiAppState *state) {
+    if (!state->vim_enabled || !state->vim_mode_label) {
+        if (state->vim_mode_label) gtk_widget_set_visible(state->vim_mode_label, FALSE);
+        return;
+    }
+    gtk_widget_set_visible(state->vim_mode_label, TRUE);
+    if (state->vim_mode == VIM_NORMAL) {
+        gtk_label_set_text(GTK_LABEL(state->vim_mode_label), " NORMAL ");
+        gtk_widget_remove_css_class(state->vim_mode_label, "vim-visual-badge");
+        gtk_widget_add_css_class(state->vim_mode_label, "vim-normal-badge");
+    } else {
+        gtk_label_set_text(GTK_LABEL(state->vim_mode_label), " VISUAL ");
+        gtk_widget_remove_css_class(state->vim_mode_label, "vim-normal-badge");
+        gtk_widget_add_css_class(state->vim_mode_label, "vim-visual-badge");
+    }
+}
+static void on_cursor_moved(GtkTextBuffer *buffer, GtkTextIter *iter,
+                             GtkTextMark *mark, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (mark == gtk_text_buffer_get_insert(buffer))
+        gtk_widget_queue_draw(state->vim_cursor_area);
+}
+
+static void
+draw_vim_cursor(GtkDrawingArea *area, cairo_t *cr, 
+                int width, int height, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!state->vim_enabled) return;
+
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+    GtkTextMark *mark = gtk_text_buffer_get_insert(buffer);
+    GtkTextIter iter;
+    gtk_text_buffer_get_iter_at_mark(buffer, &iter, mark);
+
+    GdkRectangle iter_rect;
+    gtk_text_view_get_iter_location(GTK_TEXT_VIEW(state->text_view), &iter, &iter_rect);
+
+    int wx, wy;
+    gtk_text_view_buffer_to_window_coords(GTK_TEXT_VIEW(state->text_view), GTK_TEXT_WINDOW_WIDGET, iter_rect.x, iter_rect.y, &wx, &wy);
+
+    int char_width = iter_rect.width;
+    if (char_width <= 0) char_width = iter_rect.height * 0.5;
+    
+    PangoLayout *layout = gtk_widget_create_pango_layout(state->text_view, NULL);
+    
+    PangoFontDescription *desc = pango_font_description_from_string("Inter");
+    pango_font_description_set_size(desc, 12.0 * state->zoom_level * PANGO_SCALE);
+    pango_layout_set_font_description(layout, desc);
+    pango_font_description_free(desc);
+
+    char buf[8] = {0};
+    gunichar ch = gtk_text_iter_get_char(&iter);
+    
+    if (ch && ch != '\n' && ch != '\r' && ch != 0xFFFC) {
+        g_unichar_to_utf8(ch, buf);
+        pango_layout_set_text(layout, buf, -1);
+    }
+
+    if (state->vim_mode == VIM_NORMAL) {
+        cairo_set_source_rgba(cr, 0.537, 0.706, 0.980, 0.8); /* #89b4fa */
+    } else {
+        cairo_set_source_rgba(cr, 0.651, 0.890, 0.631, 0.8); /* #a6e3a1 */
+    }
+
+    cairo_rectangle(cr, wx, wy, char_width, iter_rect.height);
+    cairo_fill(cr);
+
+    if (buf[0] != '\0') {
+        cairo_set_source_rgba(cr, 0.118, 0.118, 0.180, 1.0); /* #1e1e2e */
+        
+        // Offset by pixels_above_lines to perfectly align with GTK's text baseline
+        int pixels_above = gtk_text_view_get_pixels_above_lines(GTK_TEXT_VIEW(state->text_view));
+        cairo_move_to(cr, wx, wy + pixels_above);
+        pango_cairo_show_layout(cr, layout);
+    }
+    g_object_unref(layout);
+}
+
+static void ensure_cursor_visible(CualiAppState *state) {
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+    GtkTextMark *mark = gtk_text_buffer_get_insert(buffer);
+    GtkTextIter iter;
+    gtk_text_buffer_get_iter_at_mark(buffer, &iter, mark);
+    
+    GdkRectangle rect;
+    gtk_text_view_get_cursor_locations(GTK_TEXT_VIEW(state->text_view), &iter, &rect, NULL);
+    
+    int wx, wy;
+    gtk_text_view_buffer_to_window_coords(GTK_TEXT_VIEW(state->text_view), GTK_TEXT_WINDOW_WIDGET, rect.x, rect.y, &wx, &wy);
+    
+    GtkWidget *scroll = gtk_widget_get_ancestor(state->text_view, GTK_TYPE_SCROLLED_WINDOW);
+    if (!scroll) return;
+    
+    GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scroll));
+    double v_val = gtk_adjustment_get_value(vadjustment);
+    double v_page = gtk_adjustment_get_page_size(vadjustment);
+    double v_upper = gtk_adjustment_get_upper(vadjustment);
+    
+    double padding = 60.0;
+    
+    if (wy < v_val + padding) {
+        gtk_adjustment_set_value(vadjustment, MAX(0, wy - padding));
+    } else if (wy + rect.height > v_val + v_page - padding) {
+        gtk_adjustment_set_value(vadjustment, MIN(v_upper - v_page, wy + rect.height - v_page + padding));
+    }
+}
+
+static void update_vim_cursor(CualiAppState *state) {
+    gtk_widget_remove_css_class(state->text_view, "vim-normal");
+    gtk_widget_remove_css_class(state->text_view, "vim-visual");
+    if (!state->vim_enabled) return;
+    
+    if (state->vim_mode == VIM_NORMAL) {
+        gtk_widget_add_css_class(state->text_view, "vim-normal");
+    } else {
+        gtk_widget_add_css_class(state->text_view, "vim-visual");
+    }
+    if (state->vim_cursor_area) gtk_widget_queue_draw(state->vim_cursor_area);
+}
+
+static gboolean open_highlight_dialog_at_cursor(CualiAppState *state) {
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+    GtkTextMark *mark = gtk_text_buffer_get_insert(buffer);
+    GtkTextIter iter;
+    gtk_text_buffer_get_iter_at_mark(buffer, &iter, mark);
+    
+    GSList *tags = gtk_text_iter_get_tags(&iter);
+    GSList *hl_ids = NULL;
+    int count = 0;
+    for (GSList *l = tags; l; l = l->next) {
+        int hl_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(l->data), "highlight-id"));
+        if (hl_id > 0) {
+            hl_ids = g_slist_append(hl_ids, GINT_TO_POINTER(hl_id));
+            count++;
+        }
+    }
+    g_slist_free(tags);
+    
+    if (count == 0) return FALSE;
+    
+    if (count == 1) {
+        show_tag_dialog(state, GPOINTER_TO_INT(hl_ids->data));
+    } else {
+        show_highlight_selector_dialog(state, hl_ids, 0, 0);
+    }
+    g_slist_free(hl_ids);
+    return TRUE;
+}
+
+static void
+on_vim_toggle_switched (GtkSwitch *widget, GParamSpec *pspec, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    state->vim_enabled = gtk_switch_get_active(widget);
+    if (!state->vim_enabled) {
+        state->vim_mode = VIM_NORMAL;
+    }
+    update_vim_cursor(state);
+    update_vim_status(state);
+}
+
+static gboolean
+on_vim_key_pressed(GtkEventControllerKey *controller,
+                   guint keyval, guint keycode, GdkModifierType mod,
+                   gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!state->vim_enabled) return GDK_EVENT_PROPAGATE;
+    
+    GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(state->window));
+    if (GTK_IS_EDITABLE(focus)) return GDK_EVENT_PROPAGATE;
+    
+    // Interceptar Ctrl+B explícitamente y dejar pasar otros atajos globales
+    if (mod & GDK_CONTROL_MASK) {
+        if (keyval == GDK_KEY_b || keyval == GDK_KEY_B) {
+            create_highlight_and_show_tags(state);
+            state->vim_mode = VIM_NORMAL;
+            update_vim_status(state);
+            return GDK_EVENT_STOP;
+        }
+        if (keyval != GDK_KEY_d && keyval != GDK_KEY_u && keyval != GDK_KEY_f && keyval != GDK_KEY_v) {
+            return GDK_EVENT_PROPAGATE;
+        }
+    }
+    
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text_view));
+    GtkTextMark *mark = gtk_text_buffer_get_insert(buffer);
+    GtkTextIter iter;
+    gtk_text_buffer_get_iter_at_mark(buffer, &iter, mark);
+
+    gboolean handled = TRUE;
+    
+    switch (keyval) {
+    
+    case GDK_KEY_w: {
+        gtk_text_iter_forward_word_end(&iter);
+        gtk_text_iter_forward_word_end(&iter);
+        gtk_text_iter_backward_word_start(&iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_e: {
+        gtk_text_iter_forward_word_end(&iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_b: {
+        gtk_text_iter_backward_word_start(&iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_h: {
+        gtk_text_iter_backward_char(&iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_l: {
+        gtk_text_iter_forward_char(&iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_j: {
+        gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_k: {
+        gtk_text_view_backward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_0: {
+        gtk_text_iter_set_line_offset(&iter, 0);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_dollar: {
+        gtk_text_iter_forward_to_line_end(&iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_asciicircum: { // ^ key
+        gtk_text_iter_set_line_offset(&iter, 0);
+        while (gtk_text_iter_get_char(&iter) == ' ' || gtk_text_iter_get_char(&iter) == '\t') {
+            if (!gtk_text_iter_forward_char(&iter)) break;
+        }
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_g: {
+        guint32 now = gtk_event_controller_get_current_event_time(GTK_EVENT_CONTROLLER(controller));
+        if (now - state->last_g_time < 500) {
+            gtk_text_buffer_get_start_iter(buffer, &iter);
+            if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+            else gtk_text_buffer_place_cursor(buffer, &iter);
+            state->last_g_time = 0;
+            gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(state->text_view), mark, 0.0, TRUE, 0.0, 0.0);
+        } else {
+            state->last_g_time = now;
+            return GDK_EVENT_STOP; // Wait for second g
+        }
+        break;
+    }
+    case GDK_KEY_G: {
+        gtk_text_buffer_get_end_iter(buffer, &iter);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(state->text_view), mark, 0.0, TRUE, 0.0, 0.0);
+        break;
+    }
+    case GDK_KEY_d: {
+        if (mod & GDK_CONTROL_MASK) {
+            for (int i=0; i<15; i++) gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+            if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+            else gtk_text_buffer_place_cursor(buffer, &iter);
+        } else handled = FALSE;
+        break;
+    }
+    case GDK_KEY_u: {
+        if (mod & GDK_CONTROL_MASK) {
+            for (int i=0; i<15; i++) gtk_text_view_backward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+            if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+            else gtk_text_buffer_place_cursor(buffer, &iter);
+        } else handled = FALSE;
+        break;
+    }
+    case GDK_KEY_f: {
+        if (mod & GDK_CONTROL_MASK) {
+            for (int i=0; i<30; i++) gtk_text_view_forward_display_line(GTK_TEXT_VIEW(state->text_view), &iter);
+            if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+            else gtk_text_buffer_place_cursor(buffer, &iter);
+        } else handled = FALSE;
+        break;
+    }
+    case GDK_KEY_braceleft: { // {
+        gtk_text_iter_backward_search(&iter, "\n\n", GTK_TEXT_SEARCH_VISIBLE_ONLY, &iter, NULL, NULL);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_braceright: { // }
+        gtk_text_iter_forward_search(&iter, "\n\n", GTK_TEXT_SEARCH_VISIBLE_ONLY, &iter, NULL, NULL);
+        if (state->vim_mode == VIM_VISUAL) gtk_text_buffer_move_mark_by_name(buffer, "insert", &iter);
+        else gtk_text_buffer_place_cursor(buffer, &iter);
+        break;
+    }
+    case GDK_KEY_slash: { // /
+        gtk_search_bar_set_search_mode(GTK_SEARCH_BAR(state->search_bar), TRUE);
+        gtk_widget_grab_focus(state->search_entry);
+        break;
+    }
+    case GDK_KEY_n: {
+        search_find(state, TRUE);
+        break;
+    }
+    case GDK_KEY_N: {
+        search_find(state, FALSE);
+        break;
+    }
+    case GDK_KEY_asterisk: { // *
+        GtkTextIter word_start = iter, word_end = iter;
+        if (!gtk_text_iter_starts_word(&word_start)) gtk_text_iter_backward_word_start(&word_start);
+        if (!gtk_text_iter_ends_word(&word_end)) gtk_text_iter_forward_word_end(&word_end);
+        char *word = gtk_text_iter_get_text(&word_start, &word_end);
+        if (word && strlen(word) > 0) {
+            gtk_editable_set_text(GTK_EDITABLE(state->search_entry), word);
+            search_find(state, TRUE);
+        }
+        g_free(word);
+        break;
+    }
+    case GDK_KEY_v: {
+        if (state->vim_mode == VIM_NORMAL) {
+            state->vim_mode = VIM_VISUAL;
+            GtkTextMark *sel = gtk_text_buffer_get_selection_bound(buffer);
+            gtk_text_buffer_move_mark(buffer, sel, &iter);
+        } else {
+            state->vim_mode = VIM_NORMAL;
+            gtk_text_buffer_place_cursor(buffer, &iter);
+        }
+        update_vim_status(state);
+        break;
+    }
+    case GDK_KEY_Escape: {
+        if (state->vim_mode == VIM_VISUAL) {
+            state->vim_mode = VIM_NORMAL;
+            gtk_text_buffer_place_cursor(buffer, &iter);
+            update_vim_status(state);
+            break;
+        }
+        return GDK_EVENT_PROPAGATE;
+    }
+    case GDK_KEY_Return: {
+        if (state->vim_mode == VIM_VISUAL) {
+            create_highlight_and_show_tags(state);
+            state->vim_mode = VIM_NORMAL;
+            update_vim_status(state);
+            break;
+        } else if (state->vim_mode == VIM_NORMAL) {
+            if (open_highlight_dialog_at_cursor(state)) {
+                return GDK_EVENT_STOP;
+            }
+        }
+        return GDK_EVENT_PROPAGATE;
+    }
+    default:
+        handled = FALSE;
+        break;
+    }
+    
+    if (handled) {
+        ensure_cursor_visible(state);
+        update_vim_cursor(state);
+        return GDK_EVENT_STOP;
+    }
+    return GDK_EVENT_PROPAGATE;
 }
 
 void window_init(GtkApplication *app) {
     CualiAppState *state = g_new0 (CualiAppState, 1);
     state->current_document_id = -1;
     state->zoom_level = 1.0;
+    state->map_selected_tag_id = -1;
+
+    // Cargar Inter desde recursos
+    const char *font_paths[] = {
+        "/org/cuali/fonts/InterVariable.ttf",
+        NULL
+    };
+
+    for (int i = 0; font_paths[i]; i++) {
+        GBytes *font_data = g_resources_lookup_data(font_paths[i], 0, NULL);
+        if (font_data) {
+            gsize size;
+            const guint8 *data = g_bytes_get_data(font_data, &size);
+            
+            // Fontconfig no soporta cargar desde memoria directamente, extraemos a un archivo temporal
+            char *cache_dir = g_build_filename(g_get_user_cache_dir(), "cuali", NULL);
+            g_mkdir_with_parents(cache_dir, 0755);
+            char *tmp_font_path = g_build_filename(cache_dir, "InterVariable.ttf", NULL);
+            
+            if (!g_file_test(tmp_font_path, G_FILE_TEST_EXISTS)) {
+                g_file_set_contents(tmp_font_path, (const gchar *)data, size, NULL);
+            }
+            
+            FcConfigAppFontAddFile(FcConfigGetCurrent(), (const FcChar8 *)tmp_font_path);
+            
+            g_free(tmp_font_path);
+            g_free(cache_dir);
+            g_bytes_unref(font_data);
+        }
+    }
 
     GtkCssProvider *provider = gtk_css_provider_new ();
     gtk_css_provider_load_from_string (provider, style_css);
@@ -2567,17 +2989,17 @@ void window_init(GtkApplication *app) {
     GtkWidget *header_bar = adw_header_bar_new();
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (main_toolbar_view), header_bar);
     
-    GtkWidget *back_btn = gtk_button_new_from_icon_name ("go-previous-symbolic");
+    GtkWidget *back_btn = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/go-previous-symbolic.svg");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), back_btn);
     gtk_widget_set_tooltip_text (back_btn, "Go back to welcome screen");
     g_signal_connect (back_btn, "clicked", G_CALLBACK (on_back_to_welcome_clicked), state);
 
-    GtkWidget *open_button = gtk_button_new_from_icon_name ("folder-open-symbolic");
+    GtkWidget *open_button = create_resource_icon_button ("resource:///org/cuali/icons/scalable/status/folder-open-symbolic.svg");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), open_button);
     gtk_widget_set_tooltip_text (open_button, "Open another project");
     g_signal_connect (open_button, "clicked", G_CALLBACK (on_open_project_clicked), state);
 
-    GtkWidget *add_button = gtk_button_new_from_icon_name ("list-add-symbolic");
+    GtkWidget *add_button = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/list-add-symbolic.svg");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), add_button);
     gtk_widget_set_tooltip_text (add_button, "Import a new document (PDF or Text)");
     g_signal_connect (add_button, "clicked", G_CALLBACK (on_add_button_clicked), state);
@@ -2591,17 +3013,18 @@ void window_init(GtkApplication *app) {
     adw_view_switcher_set_stack (ADW_VIEW_SWITCHER (view_switcher), ADW_VIEW_STACK (state->view_stack));
     adw_header_bar_set_title_widget (ADW_HEADER_BAR (header_bar), view_switcher);
 
-    GtkWidget *hl_button = gtk_button_new_from_icon_name ("format-text-underline-symbolic");
+    GtkWidget *hl_button = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/format-text-underline-symbolic.svg");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), hl_button);
     gtk_widget_set_tooltip_text (hl_button, "Highlight selected text (Ctrl+B)");
     g_signal_connect (hl_button, "clicked", G_CALLBACK (on_highlight_button_clicked), state);
     
-    state->edit_toggle = gtk_button_new_from_icon_name ("document-edit-symbolic");
+    state->edit_toggle = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/document-edit-symbolic.svg");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), state->edit_toggle);
     gtk_widget_set_tooltip_text (state->edit_toggle, "Toggle edit mode (Ctrl+E)");
     g_signal_connect (state->edit_toggle, "clicked", G_CALLBACK (on_edit_toggle_clicked), state);
+    gtk_widget_set_visible (state->edit_toggle, FALSE);
 
-    state->save_btn = gtk_button_new_with_label ("Save");
+    state->save_btn = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/document-save-symbolic.svg");
     gtk_widget_add_css_class (state->save_btn, "suggested-action");
     gtk_widget_set_visible (state->save_btn, FALSE);
     gtk_widget_set_sensitive (state->save_btn, FALSE);
@@ -2612,7 +3035,14 @@ void window_init(GtkApplication *app) {
     /* Primary menu (gear) */
     GtkWidget *menu_btn = gtk_menu_button_new ();
     gtk_widget_add_css_class (menu_btn, "flat");
-    gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (menu_btn), "open-menu-symbolic");
+    
+    GFile *menu_file = g_file_new_for_uri ("resource:///org/cuali/icons/scalable/actions/open-menu-symbolic.svg");
+    GIcon *menu_gicon = g_file_icon_new (menu_file);
+    g_object_unref (menu_file);
+    GtkWidget *menu_img = gtk_image_new_from_gicon (menu_gicon);
+    g_object_unref (menu_gicon);
+    gtk_menu_button_set_child (GTK_MENU_BUTTON (menu_btn), menu_img);
+    
     gtk_widget_set_tooltip_text (menu_btn, "Main menu");
 
     GtkWidget *menu_popover = gtk_popover_new ();
@@ -2647,6 +3077,25 @@ void window_init(GtkApplication *app) {
     g_signal_connect (clear_proj_item, "clicked", G_CALLBACK (on_clear_project_clicked), state);
     gtk_box_append (GTK_BOX (menu_box), clear_proj_item);
 
+    GtkWidget *vim_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_top(vim_box, 6);
+    gtk_widget_set_margin_bottom(vim_box, 6);
+    gtk_widget_set_margin_start(vim_box, 12);
+    gtk_widget_set_margin_end(vim_box, 12);
+    
+    GtkWidget *vim_label = gtk_label_new("Vim Navigation");
+    gtk_widget_set_hexpand(vim_label, TRUE);
+    gtk_widget_set_halign(vim_label, GTK_ALIGN_START);
+    
+    GtkWidget *vim_switch = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(vim_switch), TRUE);
+    gtk_widget_set_valign(vim_switch, GTK_ALIGN_CENTER);
+    g_signal_connect(vim_switch, "notify::active", G_CALLBACK(on_vim_toggle_switched), state);
+    
+    gtk_box_append(GTK_BOX(vim_box), vim_label);
+    gtk_box_append(GTK_BOX(vim_box), vim_switch);
+    gtk_box_append(GTK_BOX(menu_box), vim_box);
+
     gtk_popover_set_child (GTK_POPOVER (menu_popover), menu_box);
     gtk_menu_button_set_popover (GTK_MENU_BUTTON (menu_btn), menu_popover);
     adw_header_bar_pack_end (ADW_HEADER_BAR (header_bar), menu_btn);
@@ -2655,7 +3104,7 @@ void window_init(GtkApplication *app) {
     GtkWidget *info_page = adw_preferences_page_new ();
     AdwViewStackPage *page;
     page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), info_page, "info", "Information");
-    adw_view_stack_page_set_icon_name (page, "dialog-information-symbolic");
+    adw_view_stack_page_set_icon_name (page, "cuali-info-symbolic");
     
     GtkWidget *info_group = adw_preferences_group_new ();
     adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (info_group), "Project metadata");
@@ -2676,7 +3125,7 @@ void window_init(GtkApplication *app) {
     /* --- Pestaña 2: Documentos --- */
     GtkWidget *analysis_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), analysis_box, "analysis", "Documents");
-    adw_view_stack_page_set_icon_name (page, "text-x-generic-symbolic");
+    adw_view_stack_page_set_icon_name (page, "cuali-docs-symbolic");
     
     GtkWidget *split_view = adw_overlay_split_view_new();
     gtk_box_append(GTK_BOX(analysis_box), split_view);
@@ -2815,10 +3264,19 @@ void window_init(GtkApplication *app) {
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (content_scroll), paper_box);
     GtkWidget *text_view = gtk_text_view_new();
     state->text_view = text_view;
+    gtk_widget_set_focusable(text_view, FALSE);
+    update_zoom(state);
+    
+    GtkEventController *vim_keys = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(vim_keys, GTK_PHASE_CAPTURE);
+    gtk_widget_add_controller(state->window, vim_keys);
+    g_signal_connect(vim_keys, "key-pressed", G_CALLBACK(on_vim_key_pressed), state);
+    state->vim_enabled = true;
+    state->vim_mode = VIM_NORMAL;
+    
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
     g_signal_connect (buffer, "changed", G_CALLBACK (on_buffer_changed), state);
-    g_signal_connect(buffer, "insert-text", G_CALLBACK(on_insert_text), state);
-    g_signal_connect(buffer, "delete-range", G_CALLBACK(on_delete_range), state);
+    g_signal_connect (buffer, "mark-set", G_CALLBACK (on_cursor_moved), state);
     
     /* Create dialogs once */
     state->highlight_popover = GTK_WIDGET(adw_dialog_new());
@@ -2850,7 +3308,16 @@ void window_init(GtkApplication *app) {
     gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(text_view), 60);
     gtk_widget_set_hexpand(text_view, TRUE);
     gtk_widget_set_vexpand(text_view, TRUE);
-    gtk_box_append (GTK_BOX (paper_box), text_view);
+    
+    GtkWidget *overlay = gtk_overlay_new();
+    GtkWidget *cursor_area = gtk_drawing_area_new();
+    gtk_widget_set_can_target(cursor_area, FALSE); /* no intercepta clicks */
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(cursor_area), draw_vim_cursor, state, NULL);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), text_view);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), cursor_area);
+    state->vim_cursor_area = cursor_area;
+    
+    gtk_box_append (GTK_BOX (paper_box), overlay);
 
     /* ── Status bar ── */
     GtkWidget *status_bar_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
@@ -2858,6 +3325,11 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_margin_end (status_bar_box, 12);
     gtk_widget_set_margin_top (status_bar_box, 2);
     gtk_widget_set_margin_bottom (status_bar_box, 4);
+    state->vim_mode_label = gtk_label_new("");
+    gtk_widget_set_halign(state->vim_mode_label, GTK_ALIGN_START);
+    gtk_widget_set_visible(state->vim_mode_label, FALSE);
+    gtk_box_append(GTK_BOX(status_bar_box), state->vim_mode_label);
+
     state->status_label = gtk_label_new ("");
     gtk_widget_set_halign (state->status_label, GTK_ALIGN_END);
     gtk_widget_set_hexpand (state->status_label, TRUE);
@@ -2869,7 +3341,7 @@ void window_init(GtkApplication *app) {
     /* --- Pestaña 3: Resultados --- */
     GtkWidget *results_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), results_box, "results", "Results");
-    adw_view_stack_page_set_icon_name (page, "view-list-bullet-symbolic");
+    adw_view_stack_page_set_icon_name (page, "cuali-results-symbolic");
 
     GtkWidget *res_split_view = adw_overlay_split_view_new();
     gtk_box_append(GTK_BOX(results_box), res_split_view);
@@ -2936,6 +3408,8 @@ void window_init(GtkApplication *app) {
     gtk_widget_set_margin_top (state->results_list, 40);
     gtk_widget_set_margin_bottom (state->results_list, 40);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_content_scroll), state->results_list);
+
+
 
     /* ── Global key shortcuts ── */
     GtkEventController *window_keys = gtk_event_controller_key_new ();
