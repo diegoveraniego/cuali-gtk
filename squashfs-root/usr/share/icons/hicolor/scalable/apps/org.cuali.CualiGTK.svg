@@ -1,63 +1,203 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="100%" height="100%">
-  <defs>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
-      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.3"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 256 256"
+   width="100%"
+   height="100%"
+   version="1.1"
+   id="svg9"
+   sodipodi:docname="org.cuali.CualiGTK.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview9"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showguides="true"
+     inkscape:zoom="3.1523438"
+     inkscape:cx="128"
+     inkscape:cy="128"
+     inkscape:window-width="1920"
+     inkscape:window-height="1016"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg9">
+    <sodipodi:guide
+       position="109.33829,209.57993"
+       orientation="1,0"
+       id="guide20"
+       inkscape:locked="false" />
+    <sodipodi:guide
+       position="142.3829,190.2057"
+       orientation="1,0"
+       id="guide21"
+       inkscape:locked="false" />
+  </sodipodi:namedview>
+  <defs
+     id="defs4">
+    <filter
+       id="shadow"
+       x="0"
+       y="0"
+       width="1"
+       height="1">
+      <feDropShadow
+         dx="0"
+         dy="8"
+         stdDeviation="6"
+         flood-color="#000000"
+         flood-opacity="0.3" />
     </filter>
-    
-    <linearGradient id="redBody" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#E53935"/>
-      <stop offset="100%" stop-color="#B71C1C"/>
+    <linearGradient
+       id="redBody"
+       x1="48.007936"
+       y1="18.330303"
+       x2="48.007936"
+       y2="201.63333"
+       gradientTransform="scale(0.91651514,1.0910895)"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         offset="0%"
+         stop-color="#E53935"
+         id="stop1" />
+      <stop
+         offset="100%"
+         stop-color="#B71C1C"
+         id="stop2" />
     </linearGradient>
-
-    <linearGradient id="bevel" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#991B1B"/>
-      <stop offset="100%" stop-color="#5C1010"/>
+    <linearGradient
+       id="bevel"
+       x1="48.485639"
+       y1="21.779645"
+       x2="48.485639"
+       y2="206.90663"
+       gradientTransform="scale(0.90748521,1.1019463)"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         offset="0%"
+         stop-color="#991B1B"
+         id="stop3" />
+      <stop
+         offset="100%"
+         stop-color="#5C1010"
+         id="stop4" />
     </linearGradient>
+    <filter
+       inkscape:collect="always"
+       style="color-interpolation-filters:sRGB"
+       id="filter12"
+       x="-0.38414848"
+       y="-0.16680127"
+       width="1.768297"
+       height="1.3336025">
+      <feGaussianBlur
+         inkscape:collect="always"
+         stdDeviation="5.0267748"
+         id="feGaussianBlur12" />
+    </filter>
   </defs>
-
-  <g filter="url(#shadow)">
-    <path d="M 44,40 
-             A 16,16 0 0,1 60,24 
-             L 196,24 
-             A 16,16 0 0,1 212,40 
-             L 212,184 
-             A 16,16 0 0,1 196,200 
-             L 148,200 
-             L 128,228 
-             L 108,200 
-             L 60,200 
-             A 16,16 0 0,1 44,184 
-             Z" 
-          fill="url(#bevel)" />
-
-    <path d="M 44,36 
-             A 16,16 0 0,1 60,20 
-             L 196,20 
-             A 16,16 0 0,1 212,36 
-             L 212,176 
-             A 16,16 0 0,1 196,192 
-             L 148,192 
-             L 128,220 
-             L 108,192 
-             L 60,192 
-             A 16,16 0 0,1 44,176 
-             Z" 
-          fill="url(#redBody)" />
+  <ellipse
+     cx="198.741"
+     cy="64.495667"
+     fill="#ffffff"
+     opacity="0.9"
+     id="circle6"
+     rx="4.048327"
+     ry="4.3655515"
+     style="stroke-width:0.84079" />
+  <g
+     fill="#ffffff"
+     opacity="0.4"
+     stroke="none"
+     id="g9"
+     transform="translate(1.9033457,30.770756)">
+    <rect
+       x="76"
+       y="80"
+       width="60"
+       height="8"
+       rx="4"
+       id="rect6" />
+    <rect
+       x="76"
+       y="98"
+       width="104"
+       height="8"
+       rx="4"
+       id="rect7" />
+    <rect
+       x="76"
+       y="116"
+       width="104"
+       height="12"
+       rx="6"
+       fill="#ffffff"
+       opacity="0.8"
+       id="rect8" />
+    <rect
+       x="76"
+       y="136"
+       width="80"
+       height="8"
+       rx="4"
+       id="rect9" />
   </g>
-
-  <circle cx="128" cy="48" r="10" fill="#991B1B" opacity="0.4"/>
-  <circle cx="128" cy="48" r="5" fill="#FFFFFF" opacity="0.9"/>
-
-  <g fill="#FFFFFF" opacity="0.4" stroke="none">
-    <rect x="76" y="80" width="60" height="8" rx="4" />
-    <rect x="76" y="98" width="104" height="8" rx="4" />
-    <rect x="76" y="116" width="104" height="12" rx="6" fill="#FFFFFF" opacity="0.8" />
-    <rect x="76" y="136" width="80" height="8" rx="4" />
-  </g>
-
-  <path d="M 128,43 C 128,30 135,15 146,6" 
-        stroke="#B71C1C" 
-        stroke-width="3" 
-        stroke-linecap="round" 
-        fill="none" />
+  <rect
+     style="mix-blend-mode:normal;fill:#ff2424;fill-opacity:1;stroke-width:12.1468;stroke-dasharray:none"
+     id="rect23"
+     width="37.187141"
+     height="36.608013"
+     x="2.3875639"
+     y="134.80449"
+     inkscape:transform-center-x="-0.80601013"
+     inkscape:transform-center-y="-0.43097083"
+     ry="4.6857347"
+     transform="matrix(0.70444974,-0.70975387,0.7369335,0.67596524,0,0)" />
+  <rect
+     style="fill:#d40000;stroke-width:20.5;stroke-dasharray:none"
+     id="rect10"
+     width="50.755886"
+     height="94.85006"
+     x="102.78067"
+     y="85.016113"
+     ry="5.3928127" />
+  <rect
+     style="mix-blend-mode:normal;fill:#ff2424;fill-opacity:1;stroke-width:19.6;stroke-dasharray:none"
+     id="rect11"
+     width="49.486988"
+     height="90.40892"
+     x="102.78067"
+     y="85.016106"
+     inkscape:transform-center-x="-0.95167322"
+     inkscape:transform-center-y="0.63444838"
+     ry="4.1239157" />
+  <path
+     style="mix-blend-mode:normal;fill:#ffaaaa;fill-opacity:1;stroke-width:1.5;stroke-dasharray:none;paint-order:stroke markers fill;filter:url(#filter12)"
+     d="m 111.98017,95.167286 31.4052,0.634449 -28.23296,14.275095 25.69517,1.90334 -23.4746,15.22677 c 0,0 23.15738,-0.95167 22.52293,0.63445 -0.63445,1.58612 -27.28129,24.7435 -27.28129,24.7435 l 29.18463,-0.95168 -27.91574,15.54399 28.23297,0.31723"
+     id="path12" />
+  <rect
+     style="fill:#ffd5d5;fill-opacity:1;stroke-width:14.184;stroke-dasharray:none;paint-order:stroke markers fill"
+     id="rect15"
+     width="38.701363"
+     height="58.369274"
+     x="109.12514"
+     y="102.46344"
+     ry="29.184637"
+     rx="0.95167285" />
+  <rect
+     style="fill:#ffd5d5;fill-opacity:1;stroke-width:19.6;stroke-dasharray:none;paint-order:stroke markers fill"
+     id="rect16"
+     width="1.9033457"
+     height="2.2205701"
+     x="134.18588"
+     y="103.0979"
+     ry="0.95167285" />
 </svg>
