@@ -196,6 +196,41 @@ bool db_tag_get_info(int tag_id, char **path, char **description, char **color) 
 }
 
 bool db_tag_update(int tag_id, const char *path, const char *description) {
+    // 1. Fetch original path and project_id to check for changes and cascade
+    char *orig_path = NULL;
+    int project_id = -1;
+    sqlite3_stmt *select_stmt;
+    const char *select_sql = "SELECT path, project_id FROM tags WHERE id = ?;";
+    if (sqlite3_prepare_v2(db, select_sql, -1, &select_stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(select_stmt, 1, tag_id);
+        if (sqlite3_step(select_stmt) == SQLITE_ROW) {
+            orig_path = g_strdup((const char *)sqlite3_column_text(select_stmt, 0));
+            project_id = sqlite3_column_int(select_stmt, 1);
+        }
+        sqlite3_finalize(select_stmt);
+    }
+
+    if (orig_path && strcmp(orig_path, path) != 0) {
+        // 2. Cascade rename all descendant tags (e.g. parent/child -> newparent/child)
+        sqlite3_stmt *cascade_stmt;
+        const char *cascade_sql = "UPDATE tags SET path = ? || SUBSTR(path, ?) WHERE project_id = ? AND path LIKE ?;";
+        if (sqlite3_prepare_v2(db, cascade_sql, -1, &cascade_stmt, NULL) == SQLITE_OK) {
+            char *like_pattern = g_strdup_printf("%s/%%", orig_path);
+            int substr_start = (int)strlen(orig_path) + 1; // 1-based index in SQLite SUBSTR
+            
+            sqlite3_bind_text(cascade_stmt, 1, path, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(cascade_stmt, 2, substr_start);
+            sqlite3_bind_int(cascade_stmt, 3, project_id);
+            sqlite3_bind_text(cascade_stmt, 4, like_pattern, -1, SQLITE_TRANSIENT);
+            
+            sqlite3_step(cascade_stmt);
+            sqlite3_finalize(cascade_stmt);
+            g_free(like_pattern);
+        }
+    }
+    g_free(orig_path);
+
+    // 3. Update the tag itself
     sqlite3_stmt *stmt;
     const char *sql = "UPDATE tags SET path = ?, description = ? WHERE id = ?;";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return false;
@@ -206,6 +241,7 @@ bool db_tag_update(int tag_id, const char *path, const char *description) {
     sqlite3_finalize(stmt);
     return success;
 }
+
 
 bool db_tag_update_color(int tag_id, const char *color) {
     sqlite3_stmt *stmt;
@@ -546,7 +582,7 @@ sqlite3_stmt* db_tags_get_for_highlight(int highlight_id) {
 sqlite3_stmt* db_results_get_all(int project_id) {
     sqlite3_stmt *stmt;
     const char *sql = 
-        "SELECT h.snippet, d.name, GROUP_CONCAT(t.path || '|||' || COALESCE(t.color, '#77767b'), '@@@') as tags FROM highlights h "
+        "SELECT h.snippet, d.name, GROUP_CONCAT(t.path || '|||' || COALESCE(t.color, '#77767b'), '@@@') as tags, h.id, h.memo FROM highlights h "
         "JOIN documents d ON h.document_id = d.id "
         "JOIN highlight_tags ht ON h.id = ht.highlight_id "
         "JOIN tags t ON ht.tag_id = t.id "
@@ -645,4 +681,54 @@ sqlite3_stmt* db_tags_get_cooccurrence(int project_id) {
     }
     sqlite3_bind_int(stmt, 1, project_id);
     return stmt;
+}
+
+bool db_highlight_update_bounds(int highlight_id, int start, int end, const char *snippet) {
+    if (!db) return false;
+    sqlite3_stmt *stmt;
+    const char *sql = "UPDATE highlights SET start_offset = ?, end_offset = ?, snippet = ? WHERE id = ?;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare highlight bounds update: %s\n", sqlite3_errmsg(db));
+        return false;
+    }
+    sqlite3_bind_int(stmt, 1, start);
+    sqlite3_bind_int(stmt, 2, end);
+    sqlite3_bind_text(stmt, 3, snippet, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 4, highlight_id);
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+char* db_document_get_contents_by_highlight(int highlight_id, int *document_id, char **doc_name) {
+    if (!db) return NULL;
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT d.id, d.name, d.contents FROM documents d JOIN highlights h ON h.document_id = d.id WHERE h.id = ?;";
+    char *contents = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, highlight_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            if (document_id) *document_id = sqlite3_column_int(stmt, 0);
+            if (doc_name) *doc_name = g_strdup((const char*)sqlite3_column_text(stmt, 1));
+            contents = g_strdup((const char*)sqlite3_column_text(stmt, 2));
+        }
+        sqlite3_finalize(stmt);
+    }
+    return contents;
+}
+
+char* db_highlight_get_first_tag_color(int highlight_id) {
+    if (!db) return g_strdup("#3584e4");
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT t.color FROM tags t JOIN highlight_tags ht ON t.id = ht.tag_id WHERE ht.highlight_id = ? LIMIT 1;";
+    char *color = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, highlight_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            color = g_strdup((const char*)sqlite3_column_text(stmt, 0));
+        }
+        sqlite3_finalize(stmt);
+    }
+    if (!color) color = g_strdup("#3584e4");
+    return color;
 }

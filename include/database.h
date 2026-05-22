@@ -38,6 +38,9 @@ bool db_highlight_unlink_tag(int highlight_id, int tag_id);
 bool db_highlight_delete(int highlight_id);
 bool db_highlights_shift_offsets(int document_id, int from_offset, int delta);
 bool db_highlight_get_offsets(int highlight_id, int *start, int *end);
+bool db_highlight_update_bounds(int highlight_id, int start, int end, const char *snippet);
+char* db_document_get_contents_by_highlight(int highlight_id, int *document_id, char **doc_name);
+char* db_highlight_get_first_tag_color(int highlight_id);
 sqlite3_stmt* db_highlights_get_for_document(int document_id);
 
 sqlite3_stmt* db_results_get_all(int project_id);
