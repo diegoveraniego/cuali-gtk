@@ -81,6 +81,29 @@ typedef struct {
 
     /* Last active document per project (restored on reopen) */
     int      last_document_id;
+
+    /* Revision Tab State */
+    GtkWidget *revision_list;
+    GtkWidget *revision_text_view;
+    GtkTextTag *revision_context_tag;
+    GtkTextTag *revision_highlight_tag;
+    GtkWidget *revision_memo_view;
+    GtkWidget *revision_flow_box;
+    GtkWidget *revision_tag_search_entry;
+    GtkWidget *revision_tag_new_entry;
+    GtkWidget *revision_sidebar_search_entry;
+    int revision_highlight_id;
+    int revision_document_id;
+    char *revision_doc_name;
+    char *revision_original_contents;
+    char *revision_clean_text;
+    int *revision_offset_map;
+    int revision_plain_text_len;
+    int revision_current_start;
+    int revision_current_end;
+    char *revision_highlight_color;
+    GtkWidget *revision_btn_prev;
+    GtkWidget *revision_btn_next;
 } CualiAppState;
 
 void window_init(GtkApplication *app);

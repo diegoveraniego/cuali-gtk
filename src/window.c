@@ -123,6 +123,21 @@ static void update_status_bar (CualiAppState *state);
 static void search_clear_matches (CualiAppState *state);
 static void search_find (CualiAppState *state, bool forward);
 
+static void refresh_revision_list (CualiAppState *state);
+static void load_revision_highlight (CualiAppState *state, int highlight_id);
+static void revision_shifter_redraw (CualiAppState *state);
+static void on_revision_row_selected (GtkListBox *list_box, GtkListBoxRow *row, gpointer user_data);
+static void on_revision_save_clicked (GtkButton *btn, gpointer user_data);
+static void on_revision_prev_clicked (GtkButton *btn, gpointer user_data);
+static void on_revision_next_clicked (GtkButton *btn, gpointer user_data);
+static void on_revision_start_back_clicked (GtkButton *btn, gpointer user_data);
+static void on_revision_start_forward_clicked (GtkButton *btn, gpointer user_data);
+static void on_revision_end_back_clicked (GtkButton *btn, gpointer user_data);
+static void on_revision_end_forward_clicked (GtkButton *btn, gpointer user_data);
+static void on_revision_new_tag_activated (GtkEntry *entry, gpointer user_data);
+static void on_revision_sidebar_search_changed (GtkSearchEntry *entry, gpointer user_data);
+static gboolean revision_sidebar_filter_func (GtkListBoxRow *row, gpointer user_data);
+
 typedef struct {
     CualiAppState *state;
     int offset;
@@ -2547,6 +2562,469 @@ on_next_highlight_clicked (GtkButton *btn, gpointer user_data)
     }
 }
 
+/* =========================================================================
+   REVISION TAB IMPLEMENTATION
+   ========================================================================= */
+
+static void
+revision_shifter_redraw (CualiAppState *state)
+{
+    if (!state->revision_clean_text || state->revision_highlight_id <= 0) return;
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->revision_text_view));
+    
+    // Clear all tags in buffer
+    GtkTextIter start_iter, end_iter;
+    gtk_text_buffer_get_bounds (buffer, &start_iter, &end_iter);
+    gtk_text_buffer_remove_all_tags (buffer, &start_iter, &end_iter);
+    
+    // Apply dimmed context tag to the whole text
+    gtk_text_buffer_apply_tag (buffer, state->revision_context_tag, &start_iter, &end_iter);
+    
+    // Convert start_byte and end_byte offsets to character offsets
+    int char_start = (int)g_utf8_pointer_to_offset (state->revision_clean_text, state->revision_clean_text + state->revision_current_start);
+    int char_end   = (int)g_utf8_pointer_to_offset (state->revision_clean_text, state->revision_clean_text + state->revision_current_end);
+    
+    GtkTextIter hl_start_iter, hl_end_iter;
+    gtk_text_buffer_get_iter_at_offset (buffer, &hl_start_iter, char_start);
+    gtk_text_buffer_get_iter_at_offset (buffer, &hl_end_iter, char_end);
+    
+    // Remove dimmed context tag from the highlight range
+    gtk_text_buffer_remove_tag (buffer, state->revision_context_tag, &hl_start_iter, &hl_end_iter);
+    
+    // Apply highlight tag
+    if (state->revision_highlight_color) {
+        g_object_set (state->revision_highlight_tag, "background", state->revision_highlight_color, NULL);
+    } else {
+        g_object_set (state->revision_highlight_tag, "background", "#77767b", NULL);
+    }
+    gtk_text_buffer_apply_tag (buffer, state->revision_highlight_tag, &hl_start_iter, &hl_end_iter);
+}
+
+static void
+load_revision_highlight (CualiAppState *state, int highlight_id)
+{
+    if (highlight_id <= 0) return;
+
+    // Free previous string buffers
+    g_free (state->revision_doc_name);
+    g_free (state->revision_original_contents);
+    g_free (state->revision_clean_text);
+    g_free (state->revision_highlight_color);
+    if (state->revision_offset_map) {
+        g_free (state->revision_offset_map);
+        state->revision_offset_map = NULL;
+    }
+
+    state->revision_doc_name = NULL;
+    state->revision_original_contents = NULL;
+    state->revision_clean_text = NULL;
+    state->revision_highlight_color = NULL;
+
+    int doc_id = 0;
+    char *doc_name = NULL;
+    char *contents_html = db_document_get_contents_by_highlight (highlight_id, &doc_id, &doc_name);
+    if (!contents_html) return;
+    
+    int start_off = 0, end_off = 0;
+    if (!db_highlight_get_offsets (highlight_id, &start_off, &end_off)) {
+        g_free (contents_html);
+        g_free (doc_name);
+        return;
+    }
+
+    state->revision_highlight_id = highlight_id;
+    state->revision_document_id = doc_id;
+    state->revision_doc_name = doc_name;
+    state->revision_original_contents = contents_html;
+    state->revision_clean_text = map_html (contents_html, &state->revision_offset_map, &state->revision_plain_text_len);
+    state->revision_current_start = start_off;
+    state->revision_current_end = end_off;
+    state->revision_highlight_color = db_highlight_get_first_tag_color (highlight_id);
+
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->revision_text_view));
+    gtk_text_buffer_set_text (buffer, state->revision_clean_text ? state->revision_clean_text : "", -1);
+
+    // Apply redraw/tagging
+    revision_shifter_redraw (state);
+
+    // Load memo text
+    char *memo_text = NULL;
+    db_highlight_get_memo (highlight_id, &memo_text);
+    GtkTextBuffer *memo_buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->revision_memo_view));
+    gtk_text_buffer_set_text (memo_buffer, memo_text ? memo_text : "", -1);
+    g_free (memo_text);
+
+    // Set properties/flowbox highlight ID data
+    g_object_set_data (G_OBJECT (state->revision_tag_new_entry), "highlight_id", GINT_TO_POINTER (highlight_id));
+    
+    // Repopulate tag flowbox
+    populate_tag_dialog_list (state, highlight_id, state->revision_flow_box);
+
+    // Scroll context view to target highlights position in idle
+    ContextScrollData *sdata = g_new0 (ContextScrollData, 1);
+    sdata->text_view = state->revision_text_view;
+    sdata->char_start = (int)g_utf8_pointer_to_offset (state->revision_clean_text, state->revision_clean_text + state->revision_current_start);
+    g_idle_add (context_scroll_idle, sdata);
+}
+
+static void
+refresh_revision_list (CualiAppState *state)
+{
+    if (!state->revision_list) return;
+    
+    // Remember currently selected highlight_id to restore selection if possible
+    int prev_selected_id = 0;
+    GtkListBoxRow *sel_row = gtk_list_box_get_selected_row (GTK_LIST_BOX (state->revision_list));
+    if (sel_row) {
+        prev_selected_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (sel_row), "highlight_id"));
+    }
+
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child (state->revision_list)) != NULL) {
+        gtk_list_box_remove (GTK_LIST_BOX (state->revision_list), child);
+    }
+
+    GtkListBoxRow *to_select = NULL;
+
+    sqlite3_stmt *stmt = db_results_get_all (state->current_project_id);
+    if (stmt) {
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            const char *snippet = (const char *)sqlite3_column_text (stmt, 0);
+            const char *doc_name = (const char *)sqlite3_column_text (stmt, 1);
+            const char *tags_str = (const char *)sqlite3_column_text (stmt, 2);
+            int hl_id = sqlite3_column_int (stmt, 3);
+            
+            GtkWidget *row = gtk_list_box_row_new ();
+            g_object_set_data (G_OBJECT (row), "highlight_id", GINT_TO_POINTER (hl_id));
+            if (tags_str) {
+                g_object_set_data_full (G_OBJECT (row), "tags_str", g_strdup(tags_str), g_free);
+            }
+            
+            GtkWidget *card = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+            gtk_widget_set_margin_start (card, 8);
+            gtk_widget_set_margin_end (card, 8);
+            gtk_widget_set_margin_top (card, 8);
+            gtk_widget_set_margin_bottom (card, 8);
+
+            GtkWidget *doc_lbl = gtk_label_new (doc_name);
+            gtk_widget_add_css_class (doc_lbl, "dim-label");
+            gtk_widget_set_halign (doc_lbl, GTK_ALIGN_START);
+            gtk_label_set_wrap (GTK_LABEL (doc_lbl), TRUE);
+            gtk_box_append (GTK_BOX (card), doc_lbl);
+
+            GtkWidget *snip_lbl = gtk_label_new (NULL);
+            char *clean_snippet = strip_html (snippet);
+            gtk_label_set_markup (GTK_LABEL (snip_lbl), g_strdup_printf ("“%s”", clean_snippet));
+            g_free (clean_snippet);
+            gtk_label_set_wrap (GTK_LABEL (snip_lbl), TRUE);
+            gtk_label_set_max_width_chars (GTK_LABEL (snip_lbl), 30);
+            gtk_label_set_ellipsize (GTK_LABEL (snip_lbl), PANGO_ELLIPSIZE_END);
+            gtk_widget_set_halign (snip_lbl, GTK_ALIGN_START);
+            gtk_box_append (GTK_BOX (card), snip_lbl);
+
+            gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), card);
+            gtk_list_box_append (GTK_LIST_BOX (state->revision_list), row);
+
+            if (hl_id == prev_selected_id) {
+                to_select = GTK_LIST_BOX_ROW (row);
+            }
+            if (!to_select && prev_selected_id == 0) {
+                to_select = GTK_LIST_BOX_ROW (row);
+            }
+        }
+        sqlite3_finalize (stmt);
+    }
+
+    if (to_select) {
+        gtk_list_box_select_row (GTK_LIST_BOX (state->revision_list), to_select);
+    }
+}
+
+static void
+on_revision_row_selected (GtkListBox *list_box, GtkListBoxRow *row, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!row) {
+        state->revision_highlight_id = 0;
+        return;
+    }
+
+    int hl_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (row), "highlight_id"));
+    load_revision_highlight (state, hl_id);
+
+    // Update sensitivity of Previous/Next buttons
+    GtkWidget *prev_sib = gtk_widget_get_prev_sibling (GTK_WIDGET (row));
+    GtkWidget *prev_row = NULL;
+    while (prev_sib != NULL) {
+        if (GTK_IS_LIST_BOX_ROW (prev_sib) && gtk_widget_get_child_visible (prev_sib) && gtk_widget_get_visible (prev_sib)) {
+            prev_row = prev_sib;
+            break;
+        }
+        prev_sib = gtk_widget_get_prev_sibling (prev_sib);
+    }
+
+    GtkWidget *next_sib = gtk_widget_get_next_sibling (GTK_WIDGET (row));
+    GtkWidget *next_row = NULL;
+    while (next_sib != NULL) {
+        if (GTK_IS_LIST_BOX_ROW (next_sib) && gtk_widget_get_child_visible (next_sib) && gtk_widget_get_visible (next_sib)) {
+            next_row = next_sib;
+            break;
+        }
+        next_sib = gtk_widget_get_next_sibling (next_sib);
+    }
+
+    if (state->revision_btn_prev) {
+        gtk_widget_set_sensitive (state->revision_btn_prev, prev_row != NULL);
+    }
+    if (state->revision_btn_next) {
+        gtk_widget_set_sensitive (state->revision_btn_next, next_row != NULL);
+    }
+}
+
+static void
+on_revision_save_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->revision_highlight_id <= 0) return;
+
+    int len = state->revision_current_end - state->revision_current_start;
+    if (len <= 0) return;
+
+    /* Save memo */
+    GtkTextBuffer *memo_buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->revision_memo_view));
+    GtkTextIter s, e;
+    gtk_text_buffer_get_bounds (memo_buf, &s, &e);
+    char *memo = gtk_text_buffer_get_text (memo_buf, &s, &e, FALSE);
+    db_highlight_set_memo (state->revision_highlight_id, memo ? memo : "");
+    g_free (memo);
+
+    /* Save bounds & update snippet */
+    char *new_snippet = g_strndup (state->revision_clean_text + state->revision_current_start, len);
+    if (db_highlight_update_bounds (state->revision_highlight_id, state->revision_current_start, state->revision_current_end, new_snippet)) {
+        adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
+                                     adw_toast_new ("Límites y notas actualizados quirúrgicamente."));
+        if (state->current_document_id == state->revision_document_id) {
+            load_document (state, state->revision_document_id, state->revision_doc_name, state->revision_original_contents);
+        }
+        refresh_results (state);
+        refresh_tags (state);
+    }
+    g_free (new_snippet);
+
+    /* Advance to NEXT highlight in the sidebar! */
+    GtkListBox *list = GTK_LIST_BOX (state->revision_list);
+    GtkListBoxRow *selected_row = gtk_list_box_get_selected_row (list);
+    if (selected_row) {
+        GtkWidget *curr = gtk_widget_get_next_sibling (GTK_WIDGET (selected_row));
+        GtkWidget *next_row = NULL;
+        while (curr != NULL) {
+            if (GTK_IS_LIST_BOX_ROW (curr) && gtk_widget_get_child_visible (curr) && gtk_widget_get_visible (curr)) {
+                next_row = curr;
+                break;
+            }
+            curr = gtk_widget_get_next_sibling (curr);
+        }
+        if (next_row) {
+            gtk_list_box_select_row (list, GTK_LIST_BOX_ROW (next_row));
+        } else {
+            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
+                                         adw_toast_new ("Último destaque guardado."));
+        }
+    }
+}
+
+static void
+on_revision_prev_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    GtkListBox *list = GTK_LIST_BOX (state->revision_list);
+    GtkListBoxRow *selected_row = gtk_list_box_get_selected_row (list);
+    if (selected_row) {
+        GtkWidget *curr = gtk_widget_get_prev_sibling (GTK_WIDGET (selected_row));
+        GtkWidget *prev_row = NULL;
+        while (curr != NULL) {
+            if (GTK_IS_LIST_BOX_ROW (curr) && gtk_widget_get_child_visible (curr) && gtk_widget_get_visible (curr)) {
+                prev_row = curr;
+                break;
+            }
+            curr = gtk_widget_get_prev_sibling (curr);
+        }
+        if (prev_row) {
+            gtk_list_box_select_row (list, GTK_LIST_BOX_ROW (prev_row));
+        }
+    }
+}
+
+static void
+on_revision_next_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    GtkListBox *list = GTK_LIST_BOX (state->revision_list);
+    GtkListBoxRow *selected_row = gtk_list_box_get_selected_row (list);
+    if (selected_row) {
+        GtkWidget *curr = gtk_widget_get_next_sibling (GTK_WIDGET (selected_row));
+        GtkWidget *next_row = NULL;
+        while (curr != NULL) {
+            if (GTK_IS_LIST_BOX_ROW (curr) && gtk_widget_get_child_visible (curr) && gtk_widget_get_visible (curr)) {
+                next_row = curr;
+                break;
+            }
+            curr = gtk_widget_get_next_sibling (curr);
+        }
+        if (next_row) {
+            gtk_list_box_select_row (list, GTK_LIST_BOX_ROW (next_row));
+        }
+    }
+}
+
+static void
+on_revision_start_back_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->revision_current_start <= 0) return;
+    int p = state->revision_current_start - 1;
+    while (p > 0 && (state->revision_clean_text[p] == ' ' || state->revision_clean_text[p] == '\n' || state->revision_clean_text[p] == '\t' || state->revision_clean_text[p] == '\r')) {
+        p--;
+    }
+    while (p > 0 && state->revision_clean_text[p] != ' ' && state->revision_clean_text[p] != '\n' && state->revision_clean_text[p] != '\t' && state->revision_clean_text[p] != '\r') {
+        p--;
+    }
+    state->revision_current_start = (p > 0) ? p + 1 : 0;
+    revision_shifter_redraw (state);
+}
+
+static void
+on_revision_start_forward_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    int p = state->revision_current_start;
+    while (p < state->revision_current_end && state->revision_clean_text[p] != ' ' && state->revision_clean_text[p] != '\n' && state->revision_clean_text[p] != '\t' && state->revision_clean_text[p] != '\r') {
+        p++;
+    }
+    while (p < state->revision_current_end && (state->revision_clean_text[p] == ' ' || state->revision_clean_text[p] == '\n' || state->revision_clean_text[p] == '\t' || state->revision_clean_text[p] == '\r')) {
+        p++;
+    }
+    if (p < state->revision_current_end) {
+        state->revision_current_start = p;
+    }
+    revision_shifter_redraw (state);
+}
+
+static void
+on_revision_end_back_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    int p = state->revision_current_end - 1;
+    while (p > state->revision_current_start && state->revision_clean_text[p] != ' ' && state->revision_clean_text[p] != '\n' && state->revision_clean_text[p] != '\t' && state->revision_clean_text[p] != '\r') {
+        p--;
+    }
+    while (p > state->revision_current_start && (state->revision_clean_text[p] == ' ' || state->revision_clean_text[p] == '\n' || state->revision_clean_text[p] == '\t' || state->revision_clean_text[p] == '\r')) {
+        p--;
+    }
+    if (p > state->revision_current_start) {
+        state->revision_current_end = p + 1;
+    }
+    revision_shifter_redraw (state);
+}
+
+static void
+on_revision_end_forward_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    int p = state->revision_current_end;
+    int len = strlen(state->revision_clean_text);
+    while (p < len && (state->revision_clean_text[p] == ' ' || state->revision_clean_text[p] == '\n' || state->revision_clean_text[p] == '\t' || state->revision_clean_text[p] == '\r')) {
+        p++;
+    }
+    while (p < len && state->revision_clean_text[p] != ' ' && state->revision_clean_text[p] != '\n' && state->revision_clean_text[p] != '\t' && state->revision_clean_text[p] != '\r') {
+        p++;
+    }
+    state->revision_current_end = p;
+    revision_shifter_redraw (state);
+}
+
+static void
+on_revision_new_tag_activated (GtkEntry *entry, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    int highlight_id = state->revision_highlight_id;
+    const char *text = gtk_editable_get_text (GTK_EDITABLE (entry));
+    
+    if (text && *text != '\0') {
+        int count = 0;
+        sqlite3_stmt *stmt = db_tags_get_stats(state->current_project_id);
+        if (stmt) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) count++;
+            sqlite3_finalize(stmt);
+        }
+        const char *color = TAG_COLORS[count % TAG_COLORS_COUNT];
+        
+        int tag_id = db_tag_add (state->current_project_id, text, "", color);
+        if (highlight_id > 0 && tag_id > 0) {
+            db_highlight_link_tag (highlight_id, tag_id);
+        }
+        gtk_editable_set_text (GTK_EDITABLE (entry), "");
+        
+        populate_tag_dialog_list (state, highlight_id, state->revision_flow_box);
+        refresh_results (state);
+        refresh_tags (state);
+    }
+}
+
+static gboolean
+revision_sidebar_filter_func (GtkListBoxRow *row, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!state->revision_sidebar_search_entry) return TRUE;
+    
+    const char *query = gtk_editable_get_text (GTK_EDITABLE (state->revision_sidebar_search_entry));
+    if (!query || *query == '\0') return TRUE;
+    
+    GtkWidget *card = gtk_list_box_row_get_child (row);
+    if (!card) return TRUE;
+    
+    GtkWidget *doc_lbl = gtk_widget_get_first_child (card);
+    if (!doc_lbl || !GTK_IS_LABEL (doc_lbl)) return TRUE;
+    const char *doc_name = gtk_label_get_text (GTK_LABEL (doc_lbl));
+    
+    GtkWidget *snip_lbl = gtk_widget_get_next_sibling (doc_lbl);
+    if (!snip_lbl || !GTK_IS_LABEL (snip_lbl)) return TRUE;
+    const char *snippet = gtk_label_get_text (GTK_LABEL (snip_lbl));
+    
+    const char *tags_str = g_object_get_data (G_OBJECT (row), "tags_str");
+    
+    gchar *query_folded = g_utf8_casefold (query, -1);
+    
+    gboolean match = FALSE;
+    if (doc_name) {
+        gchar *folded = g_utf8_casefold (doc_name, -1);
+        if (g_strrstr (folded, query_folded)) match = TRUE;
+        g_free (folded);
+    }
+    if (!match && snippet) {
+        gchar *folded = g_utf8_casefold (snippet, -1);
+        if (g_strrstr (folded, query_folded)) match = TRUE;
+        g_free (folded);
+    }
+    if (!match && tags_str) {
+        gchar *folded = g_utf8_casefold (tags_str, -1);
+        if (g_strrstr (folded, query_folded)) match = TRUE;
+        g_free (folded);
+    }
+    
+    g_free (query_folded);
+    return match;
+}
+
+static void
+on_revision_sidebar_search_changed (GtkSearchEntry *entry, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state->revision_list) {
+        gtk_list_box_invalidate_filter (GTK_LIST_BOX (state->revision_list));
+    }
+}
+
 static void
 on_adjust_context_clicked (GtkButton *btn, gpointer user_data)
 {
@@ -2643,7 +3121,7 @@ refresh_results (CualiAppState *state)
       }
       gtk_box_append (GTK_BOX (card), tags_flow);
  
-      /* Footer Row containing Document label and Adjust Button */
+      /* Footer Row containing Document label */
       GtkWidget *footer_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
       gtk_widget_set_margin_top (footer_box, 8);
       gtk_box_append (GTK_BOX (card), footer_box);
@@ -2658,25 +3136,13 @@ refresh_results (CualiAppState *state)
       gtk_widget_set_valign (doc_label, GTK_ALIGN_CENTER);
       gtk_box_append (GTK_BOX (footer_box), doc_label);
       
-      GtkWidget *spacer = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-      gtk_widget_set_hexpand (spacer, TRUE);
-      gtk_box_append (GTK_BOX (footer_box), spacer);
-      
-      GtkWidget *adjust_btn = gtk_button_new_from_icon_name ("document-properties-symbolic");
-      gtk_widget_add_css_class (adjust_btn, "flat");
-      gtk_widget_set_tooltip_text (adjust_btn, "Ajustar límites de la cita");
-      g_object_set_data (G_OBJECT (adjust_btn), "state", state);
-      g_object_set_data (G_OBJECT (adjust_btn), "highlight_id", GINT_TO_POINTER (hl_id));
-      g_signal_connect (adjust_btn, "clicked", G_CALLBACK (on_adjust_context_clicked), NULL);
-      gtk_widget_set_valign (adjust_btn, GTK_ALIGN_CENTER);
-      gtk_box_append (GTK_BOX (footer_box), adjust_btn);
-      
       gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), card);
       gtk_list_box_append (GTK_LIST_BOX (state->results_list), row);
     }
     sqlite3_finalize (stmt);
   }
   refresh_results_tags (state);
+  refresh_revision_list (state);
 }
 
 
@@ -3146,8 +3612,8 @@ on_view_stack_visible_child_changed (GObject *object, GParamSpec *pspec, gpointe
     CualiAppState *state = (CualiAppState *)user_data;
     const char *name = adw_view_stack_get_visible_child_name (ADW_VIEW_STACK (state->view_stack));
     if (g_strcmp0 (name, "results") == 0) refresh_results (state);
+    if (g_strcmp0 (name, "revision") == 0) refresh_revision_list (state);
     if (g_strcmp0 (name, "info") == 0) refresh_project_info (state);
-
 }
 static void update_vim_status(CualiAppState *state) {
     if (!state->vim_enabled || !state->vim_mode_label) {
@@ -4138,6 +4604,256 @@ void window_init(GtkApplication *app) {
     gtk_label_set_xalign (GTK_LABEL (state->status_label), 1.0f);
     gtk_box_append (GTK_BOX (status_bar_box), state->status_label);
     gtk_box_append (GTK_BOX (doc_content_vbox), status_bar_box);
+
+    /* --- Pestaña: Revisión --- */
+    GtkWidget *revision_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), revision_box, "revision", "Revision");
+    adw_view_stack_page_set_icon_name (page, "document-edit-symbolic");
+
+    GtkWidget *rev_split_view = adw_overlay_split_view_new();
+    gtk_box_append(GTK_BOX(revision_box), rev_split_view);
+    gtk_widget_set_hexpand(rev_split_view, TRUE);
+
+    // Sidebar: list of highlights to review
+    GtkWidget *rev_sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class (rev_sidebar, "sidebar");
+    adw_overlay_split_view_set_sidebar(ADW_OVERLAY_SPLIT_VIEW(rev_split_view), rev_sidebar);
+
+    GtkWidget *rev_sidebar_title = gtk_label_new("Citas a Revisar");
+    gtk_widget_add_css_class (rev_sidebar_title, "sidebar-title");
+    gtk_widget_set_halign (rev_sidebar_title, GTK_ALIGN_START);
+    gtk_widget_set_margin_start (rev_sidebar_title, 12);
+    gtk_box_append(GTK_BOX(rev_sidebar), rev_sidebar_title);
+
+    state->revision_sidebar_search_entry = GTK_WIDGET (gtk_search_entry_new ());
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->revision_sidebar_search_entry), "Filtrar citas…");
+    gtk_widget_set_margin_start (state->revision_sidebar_search_entry, 8);
+    gtk_widget_set_margin_end (state->revision_sidebar_search_entry, 8);
+    gtk_widget_set_margin_top (state->revision_sidebar_search_entry, 4);
+    gtk_widget_set_margin_bottom (state->revision_sidebar_search_entry, 4);
+    g_signal_connect (state->revision_sidebar_search_entry, "search-changed", G_CALLBACK (on_revision_sidebar_search_changed), state);
+    gtk_box_append (GTK_BOX (rev_sidebar), state->revision_sidebar_search_entry);
+
+    GtkWidget *rev_sidebar_scroll = gtk_scrolled_window_new ();
+    gtk_widget_set_vexpand (rev_sidebar_scroll, TRUE);
+    gtk_box_append (GTK_BOX (rev_sidebar), rev_sidebar_scroll);
+
+    state->revision_list = gtk_list_box_new ();
+    gtk_widget_add_css_class (state->revision_list, "sidebar-list");
+    gtk_list_box_set_filter_func (GTK_LIST_BOX (state->revision_list), revision_sidebar_filter_func, state, NULL);
+    g_signal_connect (state->revision_list, "row-selected", G_CALLBACK (on_revision_row_selected), state);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (rev_sidebar_scroll), state->revision_list);
+
+    // Right Pane Content Box
+    GtkWidget *rev_content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(rev_split_view), rev_content_vbox);
+
+    // Content Mini Toolbar
+    GtkWidget *rev_toolbar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class (rev_toolbar, "toolbar");
+    gtk_widget_set_margin_start (rev_toolbar, 12);
+    gtk_widget_set_margin_end (rev_toolbar, 12);
+    gtk_widget_set_margin_top (rev_toolbar, 8);
+    gtk_widget_set_margin_bottom (rev_toolbar, 8);
+    gtk_box_append (GTK_BOX (rev_content_vbox), rev_toolbar);
+
+    GtkWidget *rev_toggle_btn = gtk_toggle_button_new ();
+    GtkWidget *rev_toggle_icon = gtk_image_new_from_icon_name ("sidebar-show-symbolic");
+    gtk_button_set_child (GTK_BUTTON (rev_toggle_btn), rev_toggle_icon);
+    gtk_widget_add_css_class (rev_toggle_btn, "flat");
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (rev_toggle_btn), TRUE);
+    gtk_widget_set_tooltip_text (rev_toggle_btn, "Mostrar/Ocultar barra lateral");
+    g_signal_connect (rev_toggle_btn, "toggled", G_CALLBACK (on_doc_sidebar_toggle), rev_split_view);
+    gtk_box_append (GTK_BOX (rev_toolbar), rev_toggle_btn);
+
+    GtkWidget *rev_title_label = gtk_label_new ("Espacio de Trabajo de Revisión");
+    gtk_widget_add_css_class (rev_title_label, "heading");
+    gtk_widget_set_margin_start (rev_title_label, 12);
+    gtk_box_append (GTK_BOX (rev_toolbar), rev_title_label);
+
+    GtkWidget *rev_sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_append (GTK_BOX (rev_content_vbox), rev_sep);
+
+    // 1. Scrolled context text view at the top (with white/paper sheet card background)
+    GtkWidget *rev_scroll_text = gtk_scrolled_window_new ();
+    gtk_widget_set_vexpand (rev_scroll_text, TRUE);
+    gtk_widget_set_margin_start (rev_scroll_text, 16);
+    gtk_widget_set_margin_end (rev_scroll_text, 16);
+    gtk_widget_set_margin_top (rev_scroll_text, 12);
+    gtk_widget_set_margin_bottom (rev_scroll_text, 12);
+    gtk_widget_add_css_class (rev_scroll_text, "card");
+    gtk_box_append (GTK_BOX (rev_content_vbox), rev_scroll_text);
+
+    state->revision_text_view = gtk_text_view_new ();
+    gtk_text_view_set_editable (GTK_TEXT_VIEW (state->revision_text_view), FALSE);
+    gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (state->revision_text_view), GTK_WRAP_WORD);
+    gtk_widget_set_margin_start (state->revision_text_view, 12);
+    gtk_widget_set_margin_end (state->revision_text_view, 12);
+    gtk_widget_set_margin_top (state->revision_text_view, 12);
+    gtk_widget_set_margin_bottom (state->revision_text_view, 12);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (rev_scroll_text), state->revision_text_view);
+
+    GtkTextBuffer *rev_buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (state->revision_text_view));
+    state->revision_context_tag = gtk_text_buffer_create_tag (rev_buf, "revision_context",
+                                                              "foreground", "#77767b",
+                                                              "style", PANGO_STYLE_ITALIC,
+                                                              NULL);
+    state->revision_highlight_tag = gtk_text_buffer_create_tag (rev_buf, "revision_highlight",
+                                                                "foreground", "white",
+                                                                "weight", PANGO_WEIGHT_BOLD,
+                                                                NULL);
+
+    GtkWidget *rev_sep_mid = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_append (GTK_BOX (rev_content_vbox), rev_sep_mid);
+
+    // 2. Horizontal container for: Shifter control & Tags (Left), Memo / Notas (Right)
+    GtkWidget *rev_middle_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 24);
+    gtk_widget_set_margin_start (rev_middle_hbox, 16);
+    gtk_widget_set_margin_end (rev_middle_hbox, 16);
+    gtk_widget_set_margin_top (rev_middle_hbox, 8);
+    gtk_widget_set_margin_bottom (rev_middle_hbox, 8);
+    gtk_box_append (GTK_BOX (rev_content_vbox), rev_middle_hbox);
+
+    // Left Column: Shift buttons & tags list
+    GtkWidget *rev_left_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_hexpand (rev_left_vbox, TRUE);
+    gtk_box_append (GTK_BOX (rev_middle_hbox), rev_left_vbox);
+
+    // Shifter Bounds Control Box
+    GtkWidget *rev_bounds_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 24);
+    gtk_widget_set_halign (rev_bounds_box, GTK_ALIGN_CENTER);
+    gtk_box_append (GTK_BOX (rev_left_vbox), rev_bounds_box);
+
+    // Start boundary box
+    GtkWidget *rev_start_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+    GtkWidget *lbl_start = gtk_label_new ("Límite de Inicio");
+    gtk_widget_add_css_class (lbl_start, "dim-label");
+    gtk_box_append (GTK_BOX (rev_start_vbox), lbl_start);
+    GtkWidget *start_btn_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *btn_start_b = gtk_button_new_with_label ("◄ Expandir");
+    g_signal_connect (btn_start_b, "clicked", G_CALLBACK (on_revision_start_back_clicked), state);
+    GtkWidget *btn_start_f = gtk_button_new_with_label ("Contraer ►");
+    g_signal_connect (btn_start_f, "clicked", G_CALLBACK (on_revision_start_forward_clicked), state);
+    gtk_box_append (GTK_BOX (start_btn_row), btn_start_b);
+    gtk_box_append (GTK_BOX (start_btn_row), btn_start_f);
+    gtk_box_append (GTK_BOX (rev_start_vbox), start_btn_row);
+    gtk_box_append (GTK_BOX (rev_bounds_box), rev_start_vbox);
+
+    // End boundary box
+    GtkWidget *rev_end_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+    GtkWidget *lbl_end = gtk_label_new ("Límite de Fin");
+    gtk_widget_add_css_class (lbl_end, "dim-label");
+    gtk_box_append (GTK_BOX (rev_end_vbox), lbl_end);
+    GtkWidget *end_btn_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *btn_end_b = gtk_button_new_with_label ("◄ Contraer");
+    g_signal_connect (btn_end_b, "clicked", G_CALLBACK (on_revision_end_back_clicked), state);
+    GtkWidget *btn_end_f = gtk_button_new_with_label ("Expandir ►");
+    g_signal_connect (btn_end_f, "clicked", G_CALLBACK (on_revision_end_forward_clicked), state);
+    gtk_box_append (GTK_BOX (end_btn_row), btn_end_b);
+    gtk_box_append (GTK_BOX (end_btn_row), btn_end_f);
+    gtk_box_append (GTK_BOX (rev_end_vbox), end_btn_row);
+    gtk_box_append (GTK_BOX (rev_bounds_box), rev_end_vbox);
+
+    // Tags Section Heading
+    GtkWidget *lbl_tags_header = gtk_label_new ("Etiquetas asociadas");
+    gtk_widget_add_css_class (lbl_tags_header, "dim-label");
+    gtk_widget_set_halign (lbl_tags_header, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (rev_left_vbox), lbl_tags_header);
+
+    // Tag search/create box
+    GtkWidget *rev_tag_entry_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append (GTK_BOX (rev_left_vbox), rev_tag_entry_hbox);
+
+    state->revision_tag_search_entry = GTK_WIDGET (gtk_search_entry_new ());
+    gtk_entry_set_placeholder_text (GTK_ENTRY (state->revision_tag_search_entry), "Buscar etiqueta…");
+    gtk_widget_set_hexpand (state->revision_tag_search_entry, TRUE);
+    gtk_box_append (GTK_BOX (rev_tag_entry_hbox), state->revision_tag_search_entry);
+
+    state->revision_tag_new_entry = GTK_WIDGET (gtk_entry_new ());
+    gtk_entry_set_placeholder_text (GTK_ENTRY (state->revision_tag_new_entry), "+ Nueva etiqueta…");
+    gtk_widget_set_hexpand (state->revision_tag_new_entry, TRUE);
+    g_signal_connect (state->revision_tag_new_entry, "activate", G_CALLBACK (on_revision_new_tag_activated), state);
+    gtk_box_append (GTK_BOX (rev_tag_entry_hbox), state->revision_tag_new_entry);
+
+    // Tag list scrolled FlowBox
+    GtkWidget *rev_tags_scroll = gtk_scrolled_window_new ();
+    gtk_widget_set_vexpand (rev_tags_scroll, TRUE);
+    gtk_scrolled_window_set_min_content_height (GTK_SCROLLED_WINDOW (rev_tags_scroll), 120);
+    gtk_widget_add_css_class (rev_tags_scroll, "card");
+    gtk_box_append (GTK_BOX (rev_left_vbox), rev_tags_scroll);
+
+    state->revision_flow_box = gtk_flow_box_new ();
+    gtk_widget_set_valign (state->revision_flow_box, GTK_ALIGN_START);
+    gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (state->revision_flow_box), 12);
+    gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (state->revision_flow_box), GTK_SELECTION_NONE);
+    gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (state->revision_flow_box), 12);
+    gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (state->revision_flow_box), 8);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (rev_tags_scroll), state->revision_flow_box);
+
+    g_signal_connect (state->revision_tag_search_entry, "search-changed", G_CALLBACK (on_dialog_tag_search_changed), state->revision_flow_box);
+
+    // Right Column: Memo editor
+    GtkWidget *rev_right_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_hexpand (rev_right_vbox, TRUE);
+    gtk_box_append (GTK_BOX (rev_middle_hbox), rev_right_vbox);
+
+    GtkWidget *lbl_memo_header = gtk_label_new ("Notas / Memos de investigación");
+    gtk_widget_add_css_class (lbl_memo_header, "dim-label");
+    gtk_widget_set_halign (lbl_memo_header, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (rev_right_vbox), lbl_memo_header);
+
+    GtkWidget *rev_memo_scroll = gtk_scrolled_window_new ();
+    gtk_widget_set_vexpand (rev_memo_scroll, TRUE);
+    gtk_scrolled_window_set_min_content_height (GTK_SCROLLED_WINDOW (rev_memo_scroll), 160);
+    gtk_widget_add_css_class (rev_memo_scroll, "card");
+    gtk_box_append (GTK_BOX (rev_right_vbox), rev_memo_scroll);
+
+    state->revision_memo_view = gtk_text_view_new ();
+    gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (state->revision_memo_view), GTK_WRAP_WORD_CHAR);
+    gtk_text_view_set_left_margin (GTK_TEXT_VIEW (state->revision_memo_view), 12);
+    gtk_text_view_set_right_margin (GTK_TEXT_VIEW (state->revision_memo_view), 12);
+    gtk_text_view_set_top_margin (GTK_TEXT_VIEW (state->revision_memo_view), 12);
+    gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (state->revision_memo_view), 12);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (rev_memo_scroll), state->revision_memo_view);
+
+    GtkWidget *rev_sep_bot = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_append (GTK_BOX (rev_content_vbox), rev_sep_bot);
+
+    // 3. Action bar at the bottom
+    GtkWidget *rev_action_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_start (rev_action_hbox, 16);
+    gtk_widget_set_margin_end (rev_action_hbox, 16);
+    gtk_widget_set_margin_top (rev_action_hbox, 8);
+    gtk_widget_set_margin_bottom (rev_action_hbox, 8);
+    gtk_box_append (GTK_BOX (rev_content_vbox), rev_action_hbox);
+
+    // Previous / Next highlights buttons
+    GtkWidget *rev_nav_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append (GTK_BOX (rev_action_hbox), rev_nav_box);
+
+    state->revision_btn_prev = gtk_button_new_with_label ("◄ Previous");
+    gtk_widget_set_tooltip_text (state->revision_btn_prev, "Ir al destaque anterior");
+    gtk_widget_set_sensitive (state->revision_btn_prev, FALSE);
+    g_signal_connect (state->revision_btn_prev, "clicked", G_CALLBACK (on_revision_prev_clicked), state);
+    gtk_box_append (GTK_BOX (rev_nav_box), state->revision_btn_prev);
+
+    state->revision_btn_next = gtk_button_new_with_label ("Next ►");
+    gtk_widget_set_tooltip_text (state->revision_btn_next, "Ir al siguiente destaque");
+    gtk_widget_set_sensitive (state->revision_btn_next, FALSE);
+    g_signal_connect (state->revision_btn_next, "clicked", G_CALLBACK (on_revision_next_clicked), state);
+    gtk_box_append (GTK_BOX (rev_nav_box), state->revision_btn_next);
+
+    // Action right (Guardar)
+    GtkWidget *rev_save_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand (rev_save_box, TRUE);
+    gtk_widget_set_halign (rev_save_box, GTK_ALIGN_END);
+    gtk_box_append (GTK_BOX (rev_action_hbox), rev_save_box);
+
+    GtkWidget *rev_save_btn = gtk_button_new_with_label ("Guardar");
+    gtk_widget_add_css_class (rev_save_btn, "suggested-action");
+    gtk_widget_set_size_request (rev_save_btn, 140, -1);
+    g_signal_connect (rev_save_btn, "clicked", G_CALLBACK (on_revision_save_clicked), state);
+    gtk_box_append (GTK_BOX (rev_save_box), rev_save_btn);
 
     /* --- Pestaña 3: Resultados --- */
     GtkWidget *results_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
