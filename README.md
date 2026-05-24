@@ -35,7 +35,7 @@ Cuali is a native tool for qualitative data analysis, inspired by [Taguette](htt
   - View currently assigned tags.
   - Create and assign new tags on the fly.
   - Toggle tags on or off for specific highlights.
-- **AI-Assisted Analysis**: Includes `cuali-cli`, a headless CLI wrapper designed for AI agents (like Gemini or Claude) to automate tagging, generate analytical memos, and interact with your project seamlessly.
+- **Automation & Scripting**: Includes `cuali-cli`, a headless CLI wrapper designed for shell scripts, external tools, and advanced workflows to automate tagging, append memos, and interact with your project seamlessly.
 - **Results Analysis**: A unified, split-view interface of quotes grouped by tag, featuring frequency statistics sorted automatically.
 - **Thematic Export**: Generate a "Libro de temas" (Codebook) in Markdown instantly using the CLI, perfect for methodology reports.
 - **Total Privacy**: Your data belongs to you. Everything is stored locally in an SQLite database with no cloud dependencies.
@@ -94,7 +94,7 @@ To start the graphical application:
 ./cuali-gtk
 ```
 
-To use the CLI (useful for AI agents or scripting):
+To use the CLI (useful for automation or custom scripting):
 ```bash
 # Get project info
 ./cuali-cli info my_project.sqlite3
@@ -126,10 +126,10 @@ cuali-gtk/
 ├── src/
 │   ├── main.c           # Application entry point
 │   ├── window.c         # GUI and main logic
-│   ├── cli.c            # CLI wrapper for AI agents
+│   ├── cli.c            # CLI backend and automation wrapper
 │   ├── database.c       # SQLite operations
 │   └── importer.c       # Document import processing
-├── prompts/             # System prompts for AI integration
+├── prompts/             # Example automation prompts and scripts
 ├── include/
 │   ├── window.h
 │   ├── database.h
