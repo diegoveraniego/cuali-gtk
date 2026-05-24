@@ -618,7 +618,7 @@ sqlite3_stmt* db_results_get_all(int project_id) {
 sqlite3_stmt* db_tags_get_stats(int project_id) {
     sqlite3_stmt *stmt;
     const char *sql = 
-        "SELECT t.id, t.path, t.color, COUNT(ht.highlight_id) as highlight_count "
+        "SELECT t.id, t.path, t.color, COUNT(ht.highlight_id) as highlight_count, t.description "
         "FROM tags t "
         "LEFT JOIN highlight_tags ht ON t.id = ht.tag_id "
         "WHERE t.project_id = ? "

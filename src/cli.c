@@ -418,6 +418,82 @@ cmd_highlight (const char *db_path, int hl_id, int context_chars)
 }
 
 /*
+ * export-book DB
+ * Generates a Markdown "Libro de temas" (Codebook) for the thesis.
+ */
+static int
+cmd_export_book (const char *db_path)
+{
+    if (!db_init (db_path)) { print_error (2, "Cannot open database"); return 2; }
+    int project_id = get_project_id ();
+    if (project_id < 0) { print_error (3, "No project"); db_close (); return 3; }
+
+    char *name = NULL, *desc = NULL;
+    db_project_get_info (project_id, &name, &desc);
+
+    printf ("# Libro de Temas: %s\n\n", name ? name : "Proyecto sin nombre");
+    if (desc && *desc) printf ("%s\n\n", desc);
+
+    db_close ();
+    sqlite3 *raw_db = NULL;
+    if (sqlite3_open (db_path, &raw_db) != SQLITE_OK) {
+        print_error (2, "Cannot open database");
+        return 2;
+    }
+
+    const char *stats_sql = 
+        "SELECT t.id, t.path, t.description, COUNT(ht.highlight_id) "
+        "FROM tags t "
+        "LEFT JOIN highlight_tags ht ON t.id = ht.tag_id "
+        "WHERE t.project_id = ? "
+        "GROUP BY t.id "
+        "ORDER BY t.path ASC;";
+    
+    sqlite3_stmt *t_stmt;
+    if (sqlite3_prepare_v2 (raw_db, stats_sql, -1, &t_stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int (t_stmt, 1, project_id);
+        while (sqlite3_step (t_stmt) == SQLITE_ROW) {
+            int tag_id = sqlite3_column_int (t_stmt, 0);
+            const char *path = (const char *)sqlite3_column_text (t_stmt, 1);
+            const char *tdesc = (const char *)sqlite3_column_text (t_stmt, 2);
+            int count = sqlite3_column_int (t_stmt, 3);
+
+            printf ("## %s\n", path);
+            if (tdesc && *tdesc) printf ("**Descripción:** %s\n", tdesc);
+            printf ("**Frecuencia:** %d cita%s\n\n", count, count == 1 ? "" : "s");
+
+            if (count > 0) {
+                const char *ex_sql = 
+                    "SELECT h.snippet FROM highlights h "
+                    "JOIN highlight_tags ht ON h.id = ht.highlight_id "
+                    "WHERE ht.tag_id = ? ORDER BY RANDOM() LIMIT 2;";
+                sqlite3_stmt *ex_stmt;
+                if (sqlite3_prepare_v2 (raw_db, ex_sql, -1, &ex_stmt, NULL) == SQLITE_OK) {
+                    sqlite3_bind_int (ex_stmt, 1, tag_id);
+                    bool has_examples = false;
+                    while (sqlite3_step (ex_stmt) == SQLITE_ROW) {
+                        const char *snip = (const char *)sqlite3_column_text (ex_stmt, 0);
+                        if (snip) {
+                            if (!has_examples) {
+                                printf ("**Ejemplos:**\n");
+                                has_examples = true;
+                            }
+                            printf ("> \"%s\"\n\n", snip);
+                        }
+                    }
+                    sqlite3_finalize (ex_stmt);
+                }
+            }
+            printf ("---\n\n");
+        }
+        sqlite3_finalize (t_stmt);
+    }
+    sqlite3_close (raw_db);
+    g_free (name); g_free (desc);
+    return 0;
+}
+
+/*
  * export-for-ai DB HIGHLIGHT_ID
  * Full JSON package for AI consumption.
  */
@@ -832,6 +908,7 @@ print_usage (void)
         "  cuali-cli highlight  DB HIGHLIGHT_ID [--context N]\n"
         "  cuali-cli next       DB [--untagged]\n"
         "  cuali-cli export-for-ai DB HIGHLIGHT_ID\n"
+        "  cuali-cli export-book  DB\n"
         "\n"
         "  cuali-cli tag-highlight   DB HIGHLIGHT_ID TAG_PATH [--interactive]\n"
         "  cuali-cli untag-highlight DB HIGHLIGHT_ID TAG_PATH\n"
@@ -864,6 +941,10 @@ main (int argc, char *argv[])
     /* ── tags ── */
     if (strcmp (cmd, "tags") == 0)
         return cmd_tags (db_path);
+
+    /* ── export-book ── */
+    if (strcmp (cmd, "export-book") == 0)
+        return cmd_export_book (db_path);
 
     /* ── doc DB ID ── */
     if (strcmp (cmd, "doc") == 0) {
