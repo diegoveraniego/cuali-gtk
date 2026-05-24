@@ -126,7 +126,6 @@ cuali-gtk/
 
 ## Hoja de Ruta
 
-- [ ] Corregir error de posicionamiento/tiling al abrir proyectos
 - [ ] Corregir problemas de UI y mejorar la estabilidad del diseño
 - [ ] Implementar sistema de filtrado en la vista de resultados
 - [ ] Mejorar el rendimiento al cargar documentos extremadamente largos

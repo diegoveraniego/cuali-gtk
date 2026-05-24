@@ -48,20 +48,20 @@
   <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/org/cuali/icons/scalable/actions">
-    <file alias="go-previous-symbolic.svg">/usr/share/icons/Adwaita/symbolic/actions/go-previous-symbolic.svg</file>
-    <file alias="list-add-symbolic.svg">/usr/share/icons/Adwaita/symbolic/actions/list-add-symbolic.svg</file>
-    <file alias="format-text-underline-symbolic.svg">/usr/share/icons/Adwaita/symbolic/actions/format-text-underline-symbolic.svg</file>
-    <file alias="document-edit-symbolic.svg">/usr/share/icons/Adwaita/symbolic/actions/document-edit-symbolic.svg</file>
-    <file alias="document-save-symbolic.svg">/usr/share/icons/Adwaita/symbolic/actions/document-save-symbolic.svg</file>
-    <file alias="open-menu-symbolic.svg">/usr/share/icons/Adwaita/symbolic/actions/open-menu-symbolic.svg</file>
+    <file alias="go-previous-symbolic.svg">icons/symbolic/go-previous-symbolic.svg</file>
+    <file alias="list-add-symbolic.svg">icons/symbolic/list-add-symbolic.svg</file>
+    <file alias="format-text-underline-symbolic.svg">icons/symbolic/format-text-underline-symbolic.svg</file>
+    <file alias="document-edit-symbolic.svg">icons/symbolic/document-edit-symbolic.svg</file>
+    <file alias="document-save-symbolic.svg">icons/symbolic/document-save-symbolic.svg</file>
+    <file alias="open-menu-symbolic.svg">icons/symbolic/open-menu-symbolic.svg</file>
     
     <!-- Unique aliases for view stack pages to bypass any system icon theme overrides -->
-    <file alias="cuali-info-symbolic.svg">/usr/share/icons/Adwaita/symbolic/status/dialog-information-symbolic.svg</file>
-    <file alias="cuali-docs-symbolic.svg">/usr/share/icons/Adwaita/symbolic/mimetypes/text-x-generic-symbolic.svg</file>
-    <file alias="cuali-results-symbolic.svg">/usr/share/icons/Adwaita/symbolic/actions/view-list-bullet-symbolic.svg</file>
+    <file alias="cuali-info-symbolic.svg">icons/symbolic/dialog-information-symbolic.svg</file>
+    <file alias="cuali-docs-symbolic.svg">icons/symbolic/text-x-generic-symbolic.svg</file>
+    <file alias="cuali-results-symbolic.svg">icons/symbolic/view-list-bullet-symbolic.svg</file>
   </gresource>
   <gresource prefix="/org/cuali/icons/scalable/status">
-    <file alias="folder-open-symbolic.svg">/usr/share/icons/Adwaita/symbolic/status/folder-open-symbolic.svg</file>
+    <file alias="folder-open-symbolic.svg">icons/symbolic/folder-open-symbolic.svg</file>
   </gresource>
   <gresource prefix="/org/cuali/icons/scalable/apps">
     <file alias="org.cuali.CualiGTK.svg">icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg</file>

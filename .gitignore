@@ -32,3 +32,19 @@ src-tauri/gen/
 .DS_Store
 *.swp
 *.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# AppImage extracted contents
+squashfs-root/
+
+# Raw data / thesis files — keep out of repo
+*.txt
+*.org
+
+# Agent config files
+caveman.json
+skills-lock.json

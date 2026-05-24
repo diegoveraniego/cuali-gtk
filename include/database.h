@@ -42,6 +42,8 @@ bool db_highlight_update_bounds(int highlight_id, int start, int end, const char
 char* db_document_get_contents_by_highlight(int highlight_id, int *document_id, char **doc_name);
 char* db_highlight_get_first_tag_color(int highlight_id);
 sqlite3_stmt* db_highlights_get_for_document(int document_id);
+char* db_document_get_contents(int document_id);
+sqlite3_stmt* db_highlight_colors_for_document(int document_id);
 
 sqlite3_stmt* db_results_get_all(int project_id);
 sqlite3_stmt* db_tags_get_cooccurrence(int project_id);

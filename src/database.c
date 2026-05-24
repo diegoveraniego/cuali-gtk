@@ -65,6 +65,25 @@ bool db_init(const char *path) {
         return false;
     }
 
+    const char *idx_sql =
+        "CREATE INDEX IF NOT EXISTS idx_documents_project    ON documents(project_id);"
+        "CREATE INDEX IF NOT EXISTS idx_highlights_document  ON highlights(document_id);"
+        "CREATE INDEX IF NOT EXISTS idx_highlight_tags_hl    ON highlight_tags(highlight_id);"
+        "CREATE INDEX IF NOT EXISTS idx_highlight_tags_tag   ON highlight_tags(tag_id);"
+        "CREATE INDEX IF NOT EXISTS idx_tags_project         ON tags(project_id);";
+
+    rc = sqlite3_exec(db, idx_sql, 0, 0, &err_msg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "SQL error creating indexes: %s\n", err_msg);
+        sqlite3_free(err_msg);
+        return false;
+    }
+
+    sqlite3_exec(db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA cache_size=-32000;", NULL, NULL, NULL); /* 32 MB */
+    sqlite3_exec(db, "PRAGMA temp_store=MEMORY;", NULL, NULL, NULL);
+
     /* Migración: añadir color a tags si no existe */
     sqlite3_stmt *check_col;
     bool has_color = false;
@@ -430,7 +449,7 @@ bool db_highlight_delete(int highlight_id) {
 
 sqlite3_stmt* db_documents_get_all(int project_id) {
     sqlite3_stmt *stmt;
-    const char *sql = "SELECT id, name, contents FROM documents WHERE project_id = ? ORDER BY name ASC;";
+    const char *sql = "SELECT id, name FROM documents WHERE project_id = ? ORDER BY name ASC;";
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
     
@@ -731,4 +750,33 @@ char* db_highlight_get_first_tag_color(int highlight_id) {
     }
     if (!color) color = g_strdup("#3584e4");
     return color;
+}
+
+char* db_document_get_contents(int document_id) {
+    if (!db) return NULL;
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT contents FROM documents WHERE id = ?;";
+    char *contents = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, document_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            contents = g_strdup((const char*)sqlite3_column_text(stmt, 0));
+        sqlite3_finalize(stmt);
+    }
+    return contents;
+}
+
+sqlite3_stmt* db_highlight_colors_for_document(int document_id) {
+    if (!db) return NULL;
+    const char *sql =
+        "SELECT h.id, t.color "
+        "FROM highlights h "
+        "JOIN highlight_tags ht ON h.id = ht.highlight_id "
+        "JOIN tags t ON ht.tag_id = t.id "
+        "WHERE h.document_id = ? "
+        "GROUP BY h.id;";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
+    sqlite3_bind_int(stmt, 1, document_id);
+    return stmt;
 }

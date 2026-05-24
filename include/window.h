@@ -9,6 +9,14 @@ typedef enum {
 } VimMode;
 
 typedef struct {
+    char *snippet;
+    char *doc_name;
+    char *tags_str;
+    int   highlight_id;
+    char *memo;
+} ResultRow;
+
+typedef struct {
     GtkWidget *text_view;
     GtkWidget *window;
     GtkWidget *doc_list;
@@ -28,6 +36,11 @@ typedef struct {
     int *offset_map;
     int plain_text_len;
     char *selected_result_tag;
+    int results_last_project_id;
+    gboolean results_dirty;
+    int revision_last_project_id;
+    gboolean revision_dirty;
+    int results_limit;
     /* [NUEVO] */
     GtkWidget *highlight_popover;
     GtkWidget *popover_tag_list;
@@ -40,7 +53,14 @@ typedef struct {
     double zoom_level;
     bool has_unsaved_changes;
     bool is_loading_document;
-    GtkWidget *save_btn;
+    GtkWidget *save_indicator;
+    int cached_highlight_count;
+    GHashTable *css_provider_cache;
+    GPtrArray *cached_results;
+    GtkWidget *stat_docs_row;
+    GtkWidget *stat_highlights_row;
+    GtkWidget *stat_tags_row;
+    GtkWidget *stat_coverage_row;
 
     /* Busqueda en documento (Ctrl+F) */
     GtkWidget *search_bar;
@@ -78,6 +98,9 @@ typedef struct {
     gboolean vim_find_till;      /* TRUE = t/T (stop before), FALSE = f/F (land on) */
     GtkWidget *vim_mode_label;
     GtkWidget *vim_cursor_area;
+    GtkWidget *vim_toggle_row;
+    GtkWidget *vim_gear_switch;
+
 
     /* Last active document per project (restored on reopen) */
     int      last_document_id;
@@ -107,5 +130,6 @@ typedef struct {
 } CualiAppState;
 
 void window_init(GtkApplication *app);
+void window_init_with_file(GtkApplication *app, const char *path);
 
 #endif

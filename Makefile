@@ -2,7 +2,13 @@ CC = gcc
 CFLAGS = $(shell pkg-config --cflags libadwaita-1 poppler-glib sqlite3) -I./include
 LIBS = $(shell pkg-config --libs libadwaita-1 poppler-glib sqlite3) -lm
 
-SRC = src/main.c src/database.c src/importer.c src/window.c src/resources.c
+HAVE_XLSXWRITER := $(shell pkg-config --exists xlsxwriter && echo yes)
+ifeq ($(HAVE_XLSXWRITER),yes)
+    CFLAGS += -DHAVE_XLSXWRITER $(shell pkg-config --cflags xlsxwriter)
+    LIBS += $(shell pkg-config --libs xlsxwriter)
+endif
+
+SRC = src/main.c src/database.c src/importer.c src/window.c src/resources.c src/exporter.c
 OBJ = $(SRC:.c=.o)
 TARGET = cuali-gtk
 

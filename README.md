@@ -126,7 +126,6 @@ cuali-gtk/
 
 ## Roadmap
 
-- [ ] Fix positioning/tiling bug when opening projects
 - [ ] Fix UI issues and improve layout stability
 - [ ] Implement filtering system in the results view
 - [ ] Improve performance when loading extremely large documents
