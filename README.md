@@ -35,7 +35,9 @@ Cuali is a native tool for qualitative data analysis, inspired by [Taguette](htt
   - View currently assigned tags.
   - Create and assign new tags on the fly.
   - Toggle tags on or off for specific highlights.
+- **AI-Assisted Analysis**: Includes `cuali-cli`, a headless CLI wrapper designed for AI agents (like Gemini or Claude) to automate tagging, generate analytical memos, and interact with your project seamlessly.
 - **Results Analysis**: A unified, split-view interface of quotes grouped by tag, featuring frequency statistics sorted automatically.
+- **Thematic Export**: Generate a "Libro de temas" (Codebook) in Markdown instantly using the CLI, perfect for methodology reports.
 - **Total Privacy**: Your data belongs to you. Everything is stored locally in an SQLite database with no cloud dependencies.
 
 ## Gallery
@@ -85,10 +87,20 @@ Building Cuali is straightforward. Clone the repository and run:
 make
 ```
 
-This will generate the `cuali-gtk` executable binary. To start the application:
+This will generate both the `cuali-gtk` GUI executable and the `cuali-cli` backend wrapper.
 
+To start the graphical application:
 ```bash
 ./cuali-gtk
+```
+
+To use the CLI (useful for AI agents or scripting):
+```bash
+# Get project info
+./cuali-cli info my_project.sqlite3
+
+# Export a Markdown Codebook (Libro de temas)
+./cuali-cli export-book my_project.sqlite3 > libro_de_temas.md
 ```
 
 (Optional) To clean the compiled files, run `make clean`.
@@ -114,8 +126,10 @@ cuali-gtk/
 ├── src/
 │   ├── main.c           # Application entry point
 │   ├── window.c         # GUI and main logic
+│   ├── cli.c            # CLI wrapper for AI agents
 │   ├── database.c       # SQLite operations
 │   └── importer.c       # Document import processing
+├── prompts/             # System prompts for AI integration
 ├── include/
 │   ├── window.h
 │   ├── database.h
@@ -129,9 +143,10 @@ cuali-gtk/
 - [ ] Fix UI issues and improve layout stability
 - [ ] Implement filtering system in the results view
 - [ ] Improve performance when loading extremely large documents
-- [ ] Add export support (Excel, CSV)
+- [x] Add export support (Markdown Codebook via CLI, CSV)
 - [ ] Multi-language support (i18n)
 - [ ] Customizable themes
+- [ ] Explore Emacs / Doom Emacs integration using `cuali-cli` (Fun idea)
 
 ## Contributing & Support
 

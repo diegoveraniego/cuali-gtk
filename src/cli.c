@@ -892,6 +892,79 @@ cmd_append_memo (const char *db_path, int hl_id, const char *text,
     return 0;
 }
 
+/*
+ * append-tag-desc DB TAG_PATH "text" --ai NAME
+ * Appends an analytical note to a tag's description.
+ */
+static int
+cmd_append_tag_desc (const char *db_path, const char *tag_path, const char *text,
+                     const char *ai_name)
+{
+    if (!text || *text == '\0') {
+        print_error (1, "description text cannot be empty");
+        return 1;
+    }
+    if (!ai_name || *ai_name == '\0') {
+        print_error (1, "--ai NAME is required");
+        return 1;
+    }
+
+    if (!db_init (db_path)) { print_error (2, "Cannot open database"); return 2; }
+    int project_id = get_project_id ();
+
+    sqlite3_stmt *stmt = db_tags_get_all (project_id);
+    int tag_id = -1;
+    if (stmt) {
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            int   tid = sqlite3_column_int  (stmt, 0);
+            const char *tp  = (const char *)sqlite3_column_text (stmt, 1);
+            if (tp && strcmp (tp, tag_path) == 0) { tag_id = tid; break; }
+        }
+        sqlite3_finalize (stmt);
+    }
+
+    if (tag_id < 0) {
+        print_error (3, "Tag not found");
+        db_close ();
+        return 3;
+    }
+
+    char *cur_path = NULL, *cur_desc = NULL, *cur_color = NULL;
+    if (!db_tag_get_info (tag_id, &cur_path, &cur_desc, &cur_color)) {
+        print_error (3, "Failed to get tag info");
+        db_close ();
+        return 3;
+    }
+
+    char *ai_tag     = g_strdup_printf ("[IA:%s]", ai_name);
+    char *new_entry  = g_strdup_printf ("%s %s", ai_tag, text);
+    char *new_desc;
+
+    if (cur_desc && *cur_desc != '\0') {
+        new_desc = g_strdup_printf ("%s\n%s", cur_desc, new_entry);
+    } else {
+        new_desc = g_strdup (new_entry);
+    }
+
+    bool ok = db_tag_update (tag_id, cur_path, new_desc);
+    if (!ok) {
+        print_error (5, "Failed to update tag description");
+        g_free (cur_path); g_free (cur_desc); g_free (cur_color);
+        g_free (ai_tag); g_free (new_entry); g_free (new_desc);
+        db_close ();
+        return 5;
+    }
+
+    char *jdesc = json_escape (new_desc);
+    printf ("{\"ok\":true,\"tag_path\":\"%s\",\"description\":%s}\n", tag_path, jdesc);
+    
+    g_free (jdesc);
+    g_free (cur_path); g_free (cur_desc); g_free (cur_color);
+    g_free (ai_tag); g_free (new_entry); g_free (new_desc);
+    db_close ();
+    return 0;
+}
+
 /* ── Usage ── */
 
 static void
@@ -914,6 +987,7 @@ print_usage (void)
         "  cuali-cli untag-highlight DB HIGHLIGHT_ID TAG_PATH\n"
         "  cuali-cli create-tag      DB TAG_PATH [--color #HEX] [--desc \"text\"]\n"
         "  cuali-cli append-memo     DB HIGHLIGHT_ID \"text\" --ai MODEL_NAME\n"
+        "  cuali-cli append-tag-desc DB TAG_PATH \"text\" --ai MODEL_NAME\n"
         "\n"
         "Tag format: tema/subtema/sub-subtema/... (lowercase, accents preserved)\n"
         "\n"
@@ -1031,6 +1105,18 @@ main (int argc, char *argv[])
             if (strcmp (argv[i], "--ai") == 0 && i + 1 < argc)
                 ai_name = argv[++i];
         return cmd_append_memo (db_path, hl_id, text, ai_name);
+    }
+
+    /* ── append-tag-desc DB PATH "text" --ai NAME ── */
+    if (strcmp (cmd, "append-tag-desc") == 0) {
+        if (argc < 5) { print_usage (); return 1; }
+        const char *tag_path = argv[3];
+        const char *text = argv[4];
+        const char *ai_name = NULL;
+        for (int i = 5; i < argc; i++)
+            if (strcmp (argv[i], "--ai") == 0 && i + 1 < argc)
+                ai_name = argv[++i];
+        return cmd_append_tag_desc (db_path, tag_path, text, ai_name);
     }
 
     fprintf (stderr, "Unknown command: %s\n", cmd);
