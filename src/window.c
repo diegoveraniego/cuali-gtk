@@ -17,7 +17,7 @@ const char *style_css =
   "textview.vim-visual > text { caret-color: transparent; }"
   ".heading { font-family: \"Inter\", sans-serif; font-weight: 500; }"
   ".vim-badge { background-color: @accent_bg_color; color: @accent_fg_color; font-family: \"Inter\", monospace; font-weight: 700; font-size: 10pt; padding: 2px 8px; border-radius: 4px; }"
-  ".sidebar-list { background-color: transparent; }"
+  ".sidebar-list { margin: 6px; }"
   ".sidebar-title { font-weight: bold; opacity: 0.5; font-size: 0.8rem; margin-top: 18px; margin-bottom: 6px; margin-left: 12px; }"
   ".document-view { background-color: @window_bg_color; border-radius: 12px; }"
   ".paper-sheet { background-color: transparent; border-radius: 0px; margin: 0px; transition: all 0.3s; }"
@@ -1532,50 +1532,6 @@ on_key_pressed (GtkEventControllerKey *controller,
                 g_signal_emit_by_name (btn, "clicked");
             }
             return GDK_EVENT_STOP;
-        case GDK_KEY_v:
-        case GDK_KEY_V:
-            if (mod & GDK_ALT_MASK) {
-                state->vim_enabled = !state->vim_enabled;
-                if (!state->vim_enabled) {
-                    state->vim_mode = VIM_NORMAL;
-                }
-                update_vim_cursor (state);
-                update_vim_status (state);
-                if (state->vim_toggle_row) {
-                    adw_switch_row_set_active (ADW_SWITCH_ROW (state->vim_toggle_row), state->vim_enabled);
-                }
-                if (state->vim_gear_switch) {
-                    gtk_switch_set_active (GTK_SWITCH (state->vim_gear_switch), state->vim_enabled);
-                }
-                if (state->status_label) {
-                    gtk_label_set_text (GTK_LABEL (state->status_label), 
-                        state->vim_enabled ? "Vim Navigation Enabled" : "Vim Navigation Disabled");
-                }
-                return GDK_EVENT_STOP;
-            }
-            break;
-        case GDK_KEY_m:
-        case GDK_KEY_M:
-            if (!state->is_editing) {
-                state->vim_enabled = !state->vim_enabled;
-                if (!state->vim_enabled) {
-                    state->vim_mode = VIM_NORMAL;
-                }
-                update_vim_cursor (state);
-                update_vim_status (state);
-                if (state->vim_toggle_row) {
-                    adw_switch_row_set_active (ADW_SWITCH_ROW (state->vim_toggle_row), state->vim_enabled);
-                }
-                if (state->vim_gear_switch) {
-                    gtk_switch_set_active (GTK_SWITCH (state->vim_gear_switch), state->vim_enabled);
-                }
-                if (state->status_label) {
-                    gtk_label_set_text (GTK_LABEL (state->status_label), 
-                        state->vim_enabled ? "Vim Navigation Enabled" : "Vim Navigation Disabled");
-                }
-                return GDK_EVENT_STOP;
-            }
-            break;
         case GDK_KEY_z:
         case GDK_KEY_Z:
             if (state->is_editing) {
@@ -4143,44 +4099,6 @@ static gboolean open_highlight_dialog_at_cursor(CualiAppState *state) {
     return TRUE;
 }
 
-static void
-on_vim_toggle_switched (AdwSwitchRow *widget, GParamSpec *pspec, gpointer user_data)
-{
-    CualiAppState *state = (CualiAppState *)user_data;
-    gboolean active = adw_switch_row_get_active(widget);
-    if (state->vim_enabled == active) return;
-    
-    state->vim_enabled = active;
-    if (!state->vim_enabled) {
-        state->vim_mode = VIM_NORMAL;
-    }
-    update_vim_cursor(state);
-    update_vim_status(state);
-    
-    if (state->vim_gear_switch) {
-        gtk_switch_set_active (GTK_SWITCH (state->vim_gear_switch), active);
-    }
-}
-
-static void
-on_vim_gear_switch_changed (GtkSwitch *widget, GParamSpec *pspec, gpointer user_data)
-{
-    CualiAppState *state = (CualiAppState *)user_data;
-    gboolean active = gtk_switch_get_active(widget);
-    if (state->vim_enabled == active) return;
-    
-    state->vim_enabled = active;
-    if (!state->vim_enabled) {
-        state->vim_mode = VIM_NORMAL;
-    }
-    update_vim_cursor(state);
-    update_vim_status(state);
-    
-    if (state->vim_toggle_row) {
-        adw_switch_row_set_active (ADW_SWITCH_ROW (state->vim_toggle_row), active);
-    }
-}
-
 
 static gboolean
 on_vim_key_pressed(GtkEventControllerKey *controller,
@@ -4188,7 +4106,7 @@ on_vim_key_pressed(GtkEventControllerKey *controller,
                    gpointer user_data)
 {
     CualiAppState *state = (CualiAppState *)user_data;
-    if (!state->vim_enabled) return GDK_EVENT_PROPAGATE;
+    if (!state->vim_enabled || state->is_editing) return GDK_EVENT_PROPAGATE;
     
     GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(state->window));
     if (GTK_IS_EDITABLE(focus)) return GDK_EVENT_PROPAGATE;
@@ -4574,7 +4492,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     state->results_limit = 200;
     state->css_provider_cache = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
     state->cached_results = NULL;
-    state->vim_enabled = TRUE;
+    state->vim_enabled = g_getenv("CUALI_VIM_MODE") != NULL;
 
     // Inter es la fuente seleccionada para el programa
 
@@ -4645,6 +4563,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
 
     state->recent_list = gtk_list_box_new ();
     gtk_widget_add_css_class (state->recent_list, "sidebar-list");
+    gtk_widget_add_css_class (state->recent_list, "boxed-list");
     g_signal_connect (state->recent_list, "row-selected", G_CALLBACK (on_recent_row_selected), state);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (recent_scroll), state->recent_list);
 
@@ -4673,6 +4592,13 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), open_button);
     gtk_widget_set_tooltip_text (open_button, "Open another project");
     g_signal_connect (open_button, "clicked", G_CALLBACK (on_open_project_clicked), state);
+
+    state->vim_mode_label = gtk_label_new("");
+    gtk_widget_set_valign(state->vim_mode_label, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_start(state->vim_mode_label, 12);
+    gtk_widget_set_margin_end(state->vim_mode_label, 12);
+    gtk_widget_set_visible(state->vim_mode_label, FALSE);
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar), state->vim_mode_label);
 
     GtkWidget *add_button = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/list-add-symbolic.svg");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), add_button);
@@ -4763,30 +4689,6 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     g_signal_connect (clear_proj_item, "clicked", G_CALLBACK (on_clear_project_clicked), state);
     gtk_box_append (GTK_BOX (menu_box), clear_proj_item);
 
-    GtkWidget *sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
-    gtk_widget_set_margin_top (sep, 6);
-    gtk_widget_set_margin_bottom (sep, 6);
-    gtk_box_append (GTK_BOX (menu_box), sep);
-
-    GtkWidget *vim_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_set_margin_top (vim_box, 6);
-    gtk_widget_set_margin_bottom (vim_box, 6);
-    gtk_widget_set_margin_start (vim_box, 12);
-    gtk_widget_set_margin_end (vim_box, 12);
-
-    GtkWidget *vim_label = gtk_label_new ("Vim Navigation");
-    gtk_widget_set_hexpand (vim_label, TRUE);
-    gtk_widget_set_halign (vim_label, GTK_ALIGN_START);
-
-    state->vim_gear_switch = gtk_switch_new ();
-    gtk_switch_set_active (GTK_SWITCH (state->vim_gear_switch), state->vim_enabled);
-    gtk_widget_set_valign (state->vim_gear_switch, GTK_ALIGN_CENTER);
-    g_signal_connect (state->vim_gear_switch, "notify::active", G_CALLBACK (on_vim_gear_switch_changed), state);
-
-    gtk_box_append (GTK_BOX (vim_box), vim_label);
-    gtk_box_append (GTK_BOX (vim_box), state->vim_gear_switch);
-    gtk_box_append (GTK_BOX (menu_box), vim_box);
-
     gtk_popover_set_child (GTK_POPOVER (menu_popover), menu_box);
     gtk_menu_button_set_popover (GTK_MENU_BUTTON (menu_btn), menu_popover);
     adw_header_bar_pack_end (ADW_HEADER_BAR (header_bar), menu_btn);
@@ -4812,12 +4714,6 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     state->project_desc_entry = desc_row;
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group), desc_row);
     g_signal_connect (desc_row, "changed", G_CALLBACK (on_project_info_changed), state);
-
-    state->vim_toggle_row = adw_switch_row_new ();
-    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (state->vim_toggle_row), "Vim Navigation");
-    adw_switch_row_set_active (ADW_SWITCH_ROW (state->vim_toggle_row), state->vim_enabled);
-    adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group), state->vim_toggle_row);
-    g_signal_connect (state->vim_toggle_row, "notify::active", G_CALLBACK (on_vim_toggle_switched), state);
 
 
     GtkWidget *stats_group = adw_preferences_group_new ();
@@ -4866,6 +4762,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_box_append (GTK_BOX (sidebar_box), scrolled_docs);
     state->doc_list = gtk_list_box_new ();
     gtk_widget_add_css_class (state->doc_list, "sidebar-list");
+    gtk_widget_add_css_class (state->doc_list, "boxed-list");
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_docs), state->doc_list);
     g_signal_connect (state->doc_list, "row-selected", G_CALLBACK (on_doc_row_selected), state);
 
@@ -4889,6 +4786,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
 
     state->tag_list = gtk_list_box_new ();
     gtk_widget_add_css_class (state->tag_list, "sidebar-list");
+    gtk_widget_add_css_class (state->tag_list, "boxed-list");
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (state->tag_list), GTK_SELECTION_NONE);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_tags), state->tag_list);
 
@@ -4988,7 +4886,6 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_event_controller_set_propagation_phase(vim_keys, GTK_PHASE_CAPTURE);
     gtk_widget_add_controller(state->window, vim_keys);
     g_signal_connect(vim_keys, "key-pressed", G_CALLBACK(on_vim_key_pressed), state);
-    state->vim_enabled = TRUE;
     state->vim_mode = VIM_NORMAL;
     
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
@@ -5046,10 +4943,6 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_widget_set_margin_end (status_bar_box, 12);
     gtk_widget_set_margin_top (status_bar_box, 2);
     gtk_widget_set_margin_bottom (status_bar_box, 4);
-    state->vim_mode_label = gtk_label_new("");
-    gtk_widget_set_halign(state->vim_mode_label, GTK_ALIGN_START);
-    gtk_widget_set_visible(state->vim_mode_label, FALSE);
-    gtk_box_append(GTK_BOX(status_bar_box), state->vim_mode_label);
 
     state->status_label = gtk_label_new ("");
     gtk_widget_set_halign (state->status_label, GTK_ALIGN_END);
@@ -5094,6 +4987,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
 
     state->revision_list = gtk_list_box_new ();
     gtk_widget_add_css_class (state->revision_list, "sidebar-list");
+    gtk_widget_add_css_class (state->revision_list, "boxed-list");
     gtk_list_box_set_filter_func (GTK_LIST_BOX (state->revision_list), revision_sidebar_filter_func, state, NULL);
     g_signal_connect (state->revision_list, "row-selected", G_CALLBACK (on_revision_row_selected), state);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (rev_sidebar_scroll), state->revision_list);
@@ -5335,6 +5229,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_box_append (GTK_BOX (res_sidebar), res_tag_scroll);
     state->results_tag_list = gtk_list_box_new ();
     gtk_widget_add_css_class (state->results_tag_list, "sidebar-list");
+    gtk_widget_add_css_class (state->results_tag_list, "boxed-list");
     g_signal_connect (state->results_tag_list, "row-selected", G_CALLBACK (on_results_tag_selected), state);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_tag_scroll), state->results_tag_list);
 
@@ -5374,6 +5269,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_list_box_set_filter_func (GTK_LIST_BOX (state->results_list), results_filter_func, state, NULL);
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (state->results_list), GTK_SELECTION_NONE);
     gtk_widget_add_css_class (state->results_list, "sidebar-list");
+    gtk_widget_add_css_class (state->results_list, "boxed-list");
     gtk_widget_set_margin_start (state->results_list, 24);
     gtk_widget_set_margin_end (state->results_list, 24);
     gtk_widget_set_margin_top (state->results_list, 20);

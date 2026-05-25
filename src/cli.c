@@ -793,6 +793,35 @@ cmd_untag_highlight (const char *db_path, int hl_id, const char *tag_path)
 }
 
 /*
+ * create-highlight DB DOC_ID START END SNIPPET [MEMO]
+ */
+static int
+cmd_create_highlight (const char *db_path, int doc_id, int start, int end,
+                      const char *snippet, const char *memo)
+{
+    if (!db_init (db_path)) { print_error (2, "Cannot open database"); return 2; }
+    
+    int hl_id = db_highlight_add (doc_id, start, end, snippet);
+    if (hl_id < 0) {
+        print_error (5, "Failed to create highlight");
+        db_close ();
+        return 5;
+    }
+    
+    if (memo && *memo != '\0') {
+        db_highlight_set_memo (hl_id, memo);
+    }
+    
+    char *jsnip = json_escape (snippet);
+    char *jmemo = memo ? json_escape (memo) : g_strdup ("null");
+    printf ("{\"ok\":true,\"highlight_id\":%d,\"document_id\":%d,\"start_offset\":%d,\"end_offset\":%d,\"snippet\":%s,\"memo\":%s}\n",
+            hl_id, doc_id, start, end, jsnip, jmemo);
+    g_free (jsnip); g_free (jmemo);
+    db_close ();
+    return 0;
+}
+
+/*
  * create-tag DB TAG_PATH [--color HEX] [--desc "text"]
  */
 static int
@@ -986,6 +1015,7 @@ print_usage (void)
         "  cuali-cli tag-highlight   DB HIGHLIGHT_ID TAG_PATH [--interactive]\n"
         "  cuali-cli untag-highlight DB HIGHLIGHT_ID TAG_PATH\n"
         "  cuali-cli create-tag      DB TAG_PATH [--color #HEX] [--desc \"text\"]\n"
+        "  cuali-cli create-highlight DB DOC_ID START END \"SNIPPET\" [\"MEMO\"]\n"
         "  cuali-cli append-memo     DB HIGHLIGHT_ID \"text\" --ai MODEL_NAME\n"
         "  cuali-cli append-tag-desc DB TAG_PATH \"text\" --ai MODEL_NAME\n"
         "\n"
@@ -1093,6 +1123,17 @@ main (int argc, char *argv[])
             else if (strcmp (argv[i], "--desc") == 0 && i + 1 < argc) desc = argv[++i];
         }
         return cmd_create_tag (db_path, tag_path, color, desc);
+    }
+
+    /* ── create-highlight DB DOC_ID START END SNIPPET [MEMO] ── */
+    if (strcmp (cmd, "create-highlight") == 0) {
+        if (argc < 7) { print_usage (); return 1; }
+        int doc_id = atoi (argv[3]);
+        int start  = atoi (argv[4]);
+        int end    = atoi (argv[5]);
+        const char *snippet = argv[6];
+        const char *memo = (argc >= 8) ? argv[7] : NULL;
+        return cmd_create_highlight (db_path, doc_id, start, end, snippet, memo);
     }
 
     /* ── append-memo DB ID "text" --ai NAME ── */
