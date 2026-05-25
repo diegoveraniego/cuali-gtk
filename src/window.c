@@ -5078,9 +5078,11 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_widget_add_css_class (lbl_start, "dim-label");
     gtk_box_append (GTK_BOX (rev_start_vbox), lbl_start);
     GtkWidget *start_btn_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    GtkWidget *btn_start_b = gtk_button_new_with_label ("◄ Expandir");
+    GtkWidget *btn_start_b = gtk_button_new_from_icon_name ("go-previous-symbolic");
+    gtk_widget_set_tooltip_text (btn_start_b, "Expandir límite de inicio");
     g_signal_connect (btn_start_b, "clicked", G_CALLBACK (on_revision_start_back_clicked), state);
-    GtkWidget *btn_start_f = gtk_button_new_with_label ("Contraer ►");
+    GtkWidget *btn_start_f = gtk_button_new_from_icon_name ("go-next-symbolic");
+    gtk_widget_set_tooltip_text (btn_start_f, "Contraer límite de inicio");
     g_signal_connect (btn_start_f, "clicked", G_CALLBACK (on_revision_start_forward_clicked), state);
     gtk_box_append (GTK_BOX (start_btn_row), btn_start_b);
     gtk_box_append (GTK_BOX (start_btn_row), btn_start_f);
@@ -5093,9 +5095,11 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_widget_add_css_class (lbl_end, "dim-label");
     gtk_box_append (GTK_BOX (rev_end_vbox), lbl_end);
     GtkWidget *end_btn_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    GtkWidget *btn_end_b = gtk_button_new_with_label ("◄ Contraer");
+    GtkWidget *btn_end_b = gtk_button_new_from_icon_name ("go-previous-symbolic");
+    gtk_widget_set_tooltip_text (btn_end_b, "Contraer límite de fin");
     g_signal_connect (btn_end_b, "clicked", G_CALLBACK (on_revision_end_back_clicked), state);
-    GtkWidget *btn_end_f = gtk_button_new_with_label ("Expandir ►");
+    GtkWidget *btn_end_f = gtk_button_new_from_icon_name ("go-next-symbolic");
+    gtk_widget_set_tooltip_text (btn_end_f, "Expandir límite de fin");
     g_signal_connect (btn_end_f, "clicked", G_CALLBACK (on_revision_end_forward_clicked), state);
     gtk_box_append (GTK_BOX (end_btn_row), btn_end_b);
     gtk_box_append (GTK_BOX (end_btn_row), btn_end_f);
@@ -5179,13 +5183,13 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     GtkWidget *rev_nav_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append (GTK_BOX (rev_action_hbox), rev_nav_box);
 
-    state->revision_btn_prev = gtk_button_new_with_label ("◄ Previous");
+    state->revision_btn_prev = gtk_button_new_from_icon_name ("go-previous-symbolic");
     gtk_widget_set_tooltip_text (state->revision_btn_prev, "Ir al destaque anterior");
     gtk_widget_set_sensitive (state->revision_btn_prev, FALSE);
     g_signal_connect (state->revision_btn_prev, "clicked", G_CALLBACK (on_revision_prev_clicked), state);
     gtk_box_append (GTK_BOX (rev_nav_box), state->revision_btn_prev);
 
-    state->revision_btn_next = gtk_button_new_with_label ("Next ►");
+    state->revision_btn_next = gtk_button_new_from_icon_name ("go-next-symbolic");
     gtk_widget_set_tooltip_text (state->revision_btn_next, "Ir al siguiente destaque");
     gtk_widget_set_sensitive (state->revision_btn_next, FALSE);
     g_signal_connect (state->revision_btn_next, "clicked", G_CALLBACK (on_revision_next_clicked), state);
