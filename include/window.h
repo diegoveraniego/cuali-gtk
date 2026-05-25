@@ -115,6 +115,11 @@ typedef struct {
     GtkWidget *revision_tag_search_entry;
     GtkWidget *revision_tag_new_entry;
     GtkWidget *revision_sidebar_search_entry;
+    
+    GtkWidget *revision_doc_filter_btn;
+    GtkWidget *revision_doc_filter_list;
+    int revision_current_filter_doc_id;
+    
     int revision_highlight_id;
     int revision_document_id;
     char *revision_doc_name;

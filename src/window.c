@@ -126,6 +126,7 @@ static void search_clear_matches (CualiAppState *state);
 static void search_find (CualiAppState *state, bool forward);
 
 static void refresh_revision_list (CualiAppState *state);
+static void refresh_revision_doc_filter_list (CualiAppState *state);
 static void load_revision_highlight (CualiAppState *state, int highlight_id);
 static void revision_shifter_redraw (CualiAppState *state);
 static void update_save_indicator (CualiAppState *state, gboolean dirty);
@@ -2856,6 +2857,8 @@ refresh_revision_list (CualiAppState *state)
     state->revision_last_project_id = state->current_project_id;
     state->revision_dirty = FALSE;
 
+    refresh_revision_doc_filter_list (state);
+
     // Remember currently selected highlight_id to restore selection if possible
     int prev_selected_id = 0;
     GtkListBoxRow *sel_row = gtk_list_box_get_selected_row (GTK_LIST_BOX (state->revision_list));
@@ -3156,14 +3159,81 @@ on_revision_new_tag_activated (GtkEntry *entry, gpointer user_data)
     }
 }
 
+static void
+on_revision_doc_filter_selected (GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!row) return;
+
+    int doc_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (row), "doc_id"));
+    const char *doc_name = (const char *)g_object_get_data (G_OBJECT (row), "doc_name");
+    
+    state->revision_current_filter_doc_id = doc_id;
+    
+    if (state->revision_doc_filter_btn) {
+        gtk_menu_button_set_label (GTK_MENU_BUTTON (state->revision_doc_filter_btn), doc_name ? doc_name : "All documents");
+    }
+
+    if (state->revision_list) {
+        gtk_list_box_invalidate_filter (GTK_LIST_BOX (state->revision_list));
+    }
+
+    GtkPopover *popover = gtk_menu_button_get_popover (GTK_MENU_BUTTON (state->revision_doc_filter_btn));
+    if (popover) {
+        gtk_popover_popdown (popover);
+    }
+}
+
+static void
+refresh_revision_doc_filter_list (CualiAppState *state)
+{
+    if (!state->revision_doc_filter_list) return;
+
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child (state->revision_doc_filter_list))) {
+        gtk_list_box_remove (GTK_LIST_BOX (state->revision_doc_filter_list), child);
+    }
+
+    GtkWidget *all_row = gtk_list_box_row_new ();
+    GtkWidget *all_lbl = gtk_label_new ("All documents");
+    gtk_widget_set_margin_start (all_lbl, 12);
+    gtk_widget_set_margin_end (all_lbl, 12);
+    gtk_widget_set_margin_top (all_lbl, 8);
+    gtk_widget_set_margin_bottom (all_lbl, 8);
+    gtk_widget_set_halign (all_lbl, GTK_ALIGN_START);
+    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (all_row), all_lbl);
+    g_object_set_data (G_OBJECT (all_row), "doc_id", GINT_TO_POINTER (-1));
+    g_object_set_data (G_OBJECT (all_row), "doc_name", NULL);
+    gtk_list_box_append (GTK_LIST_BOX (state->revision_doc_filter_list), all_row);
+
+    sqlite3_stmt *stmt = db_documents_get_all (state->current_project_id);
+    if (!stmt) return;
+
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+        int doc_id = sqlite3_column_int (stmt, 0);
+        const char *doc_name = (const char *)sqlite3_column_text (stmt, 1);
+        
+        GtkWidget *row = gtk_list_box_row_new ();
+        g_object_set_data (G_OBJECT (row), "doc_id", GINT_TO_POINTER (doc_id));
+        g_object_set_data_full (G_OBJECT (row), "doc_name", g_strdup (doc_name), g_free);
+
+        GtkWidget *lbl = gtk_label_new (doc_name);
+        gtk_widget_set_margin_start (lbl, 12);
+        gtk_widget_set_margin_end (lbl, 12);
+        gtk_widget_set_margin_top (lbl, 8);
+        gtk_widget_set_margin_bottom (lbl, 8);
+        gtk_widget_set_halign (lbl, GTK_ALIGN_START);
+
+        gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), lbl);
+        gtk_list_box_append (GTK_LIST_BOX (state->revision_doc_filter_list), row);
+    }
+    sqlite3_finalize (stmt);
+}
+
 static gboolean
 revision_sidebar_filter_func (GtkListBoxRow *row, gpointer user_data)
 {
     CualiAppState *state = (CualiAppState *)user_data;
-    if (!state->revision_sidebar_search_entry) return TRUE;
-    
-    const char *query = gtk_editable_get_text (GTK_EDITABLE (state->revision_sidebar_search_entry));
-    if (!query || *query == '\0') return TRUE;
     
     GtkWidget *card = gtk_list_box_row_get_child (row);
     if (!card) return TRUE;
@@ -3171,6 +3241,18 @@ revision_sidebar_filter_func (GtkListBoxRow *row, gpointer user_data)
     GtkWidget *doc_lbl = gtk_widget_get_first_child (card);
     if (!doc_lbl || !GTK_IS_LABEL (doc_lbl)) return TRUE;
     const char *doc_name = gtk_label_get_text (GTK_LABEL (doc_lbl));
+    
+    if (state->revision_current_filter_doc_id != -1) {
+        const char *filter_doc_name = gtk_menu_button_get_label (GTK_MENU_BUTTON (state->revision_doc_filter_btn));
+        if (g_strcmp0 (filter_doc_name, "All documents") != 0 && g_strcmp0 (doc_name, filter_doc_name) != 0) {
+            return FALSE;
+        }
+    }
+    
+    if (!state->revision_sidebar_search_entry) return TRUE;
+    
+    const char *query = gtk_editable_get_text (GTK_EDITABLE (state->revision_sidebar_search_entry));
+    if (!query || *query == '\0') return TRUE;
     
     GtkWidget *snip_lbl = gtk_widget_get_next_sibling (doc_lbl);
     if (!snip_lbl || !GTK_IS_LABEL (snip_lbl)) return TRUE;
@@ -4492,6 +4574,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     state->results_limit = 200;
     state->css_provider_cache = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
     state->cached_results = NULL;
+    state->revision_current_filter_doc_id = -1;
     state->vim_enabled = g_getenv("CUALI_VIM_MODE") != NULL;
 
     // Inter es la fuente seleccionada para el programa
@@ -4971,6 +5054,32 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_widget_set_halign (rev_sidebar_title, GTK_ALIGN_START);
     gtk_widget_set_margin_start (rev_sidebar_title, 12);
     gtk_box_append(GTK_BOX(rev_sidebar), rev_sidebar_title);
+
+    GtkWidget *filter_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_margin_start (filter_hbox, 8);
+    gtk_widget_set_margin_end (filter_hbox, 8);
+    gtk_widget_set_margin_top (filter_hbox, 8);
+    gtk_widget_set_margin_bottom (filter_hbox, 4);
+    gtk_box_append (GTK_BOX (rev_sidebar), filter_hbox);
+
+    state->revision_doc_filter_btn = gtk_menu_button_new ();
+    gtk_menu_button_set_label (GTK_MENU_BUTTON (state->revision_doc_filter_btn), "All documents");
+    gtk_widget_set_hexpand (state->revision_doc_filter_btn, TRUE);
+    gtk_box_append (GTK_BOX (filter_hbox), state->revision_doc_filter_btn);
+
+    GtkWidget *filter_popover = gtk_popover_new ();
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (state->revision_doc_filter_btn), filter_popover);
+    
+    GtkWidget *filter_scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_max_content_height (GTK_SCROLLED_WINDOW (filter_scroll), 300);
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (filter_scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_popover_set_child (GTK_POPOVER (filter_popover), filter_scroll);
+
+    state->revision_doc_filter_list = gtk_list_box_new ();
+    gtk_list_box_set_selection_mode (GTK_LIST_BOX (state->revision_doc_filter_list), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class (state->revision_doc_filter_list, "navigation-sidebar");
+    g_signal_connect (state->revision_doc_filter_list, "row-selected", G_CALLBACK (on_revision_doc_filter_selected), state);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (filter_scroll), state->revision_doc_filter_list);
 
     state->revision_sidebar_search_entry = GTK_WIDGET (gtk_search_entry_new ());
     gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->revision_sidebar_search_entry), "Filtrar citas…");
