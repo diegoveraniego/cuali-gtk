@@ -51,6 +51,7 @@ typedef struct {
     int pending_start;
     int pending_end;
     double zoom_level;
+    GtkCssProvider *zoom_provider;
     bool has_unsaved_changes;
     bool is_loading_document;
     GtkWidget *save_indicator;

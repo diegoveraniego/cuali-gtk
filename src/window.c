@@ -23,6 +23,7 @@ const char *style_css =
   ".paper-sheet { background-color: transparent; border-radius: 0px; margin: 0px; transition: all 0.3s; }"
   ".tag-badge { background-color: @accent_bg_color; color: white; border-radius: 6px; padding: 2px 10px; font-size: 0.85rem; font-weight: 600; }"
   ".tag-count-badge { background-color: rgba(0,0,0,0.1); border-radius: 12px; padding: 1px 8px; font-size: 0.8rem; margin-right: 8px; }"
+  ".results-list { background-color: @window_bg_color; }"
   ".result-card { background-color: @view_bg_color; border-radius: 12px; padding: 20px; border: 1px solid rgba(0,0,0,0.05); margin-bottom: 12px; }"
   ".result-snippet { font-style: italic; font-size: 1.1rem; line-height: 1.6; margin-bottom: 12px; }"
   ".result-meta { font-size: 0.85rem; opacity: 0.6; margin-top: 8px; }"
@@ -3472,20 +3473,22 @@ update_zoom (CualiAppState *state)
     double font_size_pt = 12.0 * state->zoom_level;
     
     char *css = g_strdup_printf(
-        "textview { font-size: %dpt; }",
-        (int)font_size_pt
+        ".document-view { font-size: %dpt; }\n"
+        ".result-snippet { font-size: %dpt; }",
+        (int)font_size_pt, (int)(font_size_pt * 1.1)
     );
     
-    GtkCssProvider *provider = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(provider, css);
+    if (!state->zoom_provider) {
+        state->zoom_provider = gtk_css_provider_new();
+        gtk_style_context_add_provider_for_display(
+            gdk_display_get_default(),
+            GTK_STYLE_PROVIDER(state->zoom_provider),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION
+        );
+    }
+    
+    gtk_css_provider_load_from_string(state->zoom_provider, css);
     g_free(css);
-    
-    gtk_style_context_add_provider(
-        gtk_widget_get_style_context(state->text_view),
-        GTK_STYLE_PROVIDER(provider),
-        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION
-    );
-    g_object_unref(provider);
 }
 
 static void
@@ -4713,8 +4716,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_widget_set_visible (state->save_indicator, FALSE);
     gtk_widget_set_margin_start (state->save_indicator, 6);
     gtk_widget_set_margin_end (state->save_indicator, 6);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), state->save_indicator);
-    
+    // adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), state->save_indicator);
     /* Primary menu (gear) */
     GtkWidget *menu_btn = gtk_menu_button_new ();
     gtk_widget_add_css_class (menu_btn, "flat");
@@ -4961,6 +4963,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_widget_add_css_class (paper_box, "paper-sheet");
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (content_scroll), paper_box);
     GtkWidget *text_view = gtk_text_view_new();
+    gtk_widget_add_css_class (text_view, "document-view");
     state->text_view = text_view;
     gtk_widget_set_focusable(text_view, FALSE);
     update_zoom(state);
@@ -5142,6 +5145,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_box_append (GTK_BOX (rev_content_vbox), rev_scroll_text);
 
     state->revision_text_view = gtk_text_view_new ();
+    gtk_widget_add_css_class (state->revision_text_view, "document-view");
     gtk_text_view_set_editable (GTK_TEXT_VIEW (state->revision_text_view), FALSE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (state->revision_text_view), GTK_WRAP_WORD);
     gtk_widget_set_margin_start (state->revision_text_view, 12);
@@ -5368,6 +5372,24 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     g_signal_connect (res_toggle_btn, "toggled",
                       G_CALLBACK (on_res_sidebar_toggle),
                       res_split_view);
+                      
+    GtkWidget *res_zoom_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_halign (res_zoom_box, GTK_ALIGN_END);
+    gtk_widget_set_hexpand (res_zoom_box, TRUE);
+    
+    GtkWidget *res_zoom_out = gtk_button_new_from_icon_name ("zoom-out-symbolic");
+    gtk_widget_add_css_class (res_zoom_out, "flat");
+    gtk_widget_set_tooltip_text (res_zoom_out, "Zoom out");
+    g_signal_connect (res_zoom_out, "clicked", G_CALLBACK (on_zoom_out_clicked), state);
+    gtk_box_append (GTK_BOX (res_zoom_box), res_zoom_out);
+    
+    GtkWidget *res_zoom_in = gtk_button_new_from_icon_name ("zoom-in-symbolic");
+    gtk_widget_add_css_class (res_zoom_in, "flat");
+    gtk_widget_set_tooltip_text (res_zoom_in, "Zoom in");
+    g_signal_connect (res_zoom_in, "clicked", G_CALLBACK (on_zoom_in_clicked), state);
+    gtk_box_append (GTK_BOX (res_zoom_box), res_zoom_in);
+
+    gtk_box_append (GTK_BOX (res_toolbar), res_zoom_box);
 
     GtkWidget *res_sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append (GTK_BOX (res_content_vbox), res_sep);
@@ -5381,8 +5403,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     state->results_list = gtk_list_box_new ();
     gtk_list_box_set_filter_func (GTK_LIST_BOX (state->results_list), results_filter_func, state, NULL);
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (state->results_list), GTK_SELECTION_NONE);
-    gtk_widget_add_css_class (state->results_list, "sidebar-list");
-    gtk_widget_add_css_class (state->results_list, "boxed-list");
+    gtk_widget_add_css_class (state->results_list, "results-list");
     gtk_widget_set_margin_start (state->results_list, 24);
     gtk_widget_set_margin_end (state->results_list, 24);
     gtk_widget_set_margin_top (state->results_list, 20);
