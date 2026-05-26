@@ -140,14 +140,10 @@ cuali-gtk/
 
 ## Roadmap
 
-- [ ] Fix UI issues and improve layout stability
-- [ ] Implement filtering system in the results view
-- [ ] Improve performance when loading extremely large documents
-- [x] Add export support (Markdown Codebook via CLI, CSV)
 - [ ] Multi-language support (i18n)
-- [ ] Customizable themes
-- [ ] Explore Emacs / Doom Emacs integration using `cuali-cli` (Fun idea)
-
+- [ ] Data visualization page (dont know if making a new app for this or using GNOME Graphs, as it is a different funcitonality different than tagging and reviewing)
+- [ ] Make demo project for people testing
+      
 ## Contributing & Support
 
 Contributions are welcome. If you find a bug, have a feature request, or want to contribute code, please feel free to open an issue or submit a Pull Request.
