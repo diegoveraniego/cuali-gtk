@@ -22,7 +22,8 @@ typedef struct {
     GtkWidget *doc_list;
     GtkWidget *toast_overlay;
     GtkWidget *view_stack;
-    GtkWidget *tag_list;
+    GtkWidget *tag_tree_view;
+    GtkTreeStore *tag_tree_store;
     GtkWidget *results_list;
     GtkWidget *results_tag_list;
     GtkWidget *project_name_entry;

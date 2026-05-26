@@ -121,6 +121,7 @@ static void refresh_documents (CualiAppState *state);
 static void populate_recent_list (CualiAppState *state);
 static void refresh_results (CualiAppState *state);
 static void refresh_tags (CualiAppState *state);
+static void show_tag_edit_dialog (CualiAppState *state, int tag_id);
 static void refresh_stats (CualiAppState *state);
 static void update_status_bar (CualiAppState *state);
 static void search_clear_matches (CualiAppState *state);
@@ -216,29 +217,7 @@ tag_filter_func (GtkListBoxRow *row, gpointer user_data)
 static gboolean
 results_filter_func (GtkListBoxRow *row, gpointer user_data)
 {
-    CualiAppState *state = (CualiAppState *)user_data;
-    if (!state->selected_result_tag) return TRUE;
-
-    const char *tags_str = g_object_get_data (G_OBJECT (row), "tags_str");
-    if (!tags_str) return FALSE;
-
-    char **tags = g_strsplit (tags_str, "@@@", -1);
-    gboolean match = FALSE;
-    size_t sel_len = strlen (state->selected_result_tag);
-    for (int i = 0; tags[i]; i++) {
-        char **parts = g_strsplit (tags[i], "|||", 2);
-        if (parts[0]) {
-            if (g_strcmp0 (parts[0], state->selected_result_tag) == 0 ||
-                (strncmp (parts[0], state->selected_result_tag, sel_len) == 0 &&
-                 parts[0][sel_len] == '/')) {
-                match = TRUE;
-            }
-        }
-        g_strfreev (parts);
-        if (match) break;
-    }
-    g_strfreev (tags);
-    return match;
+    return TRUE;
 }
 
 
@@ -341,7 +320,8 @@ on_results_tag_selected (GtkListBox *box, GtkListBoxRow *row, gpointer user_data
         }
     }
     
-    gtk_list_box_invalidate_filter (GTK_LIST_BOX (state->results_list));
+    state->results_dirty = TRUE;
+    refresh_results (state);
 }
 
 
@@ -783,7 +763,7 @@ static void on_popover_delete_clicked(GtkButton *btn, gpointer user_data)
     if (state->active_highlight_id <= 0) return;
     
     db_highlight_delete(state->active_highlight_id);
-    adw_dialog_force_close(ADW_DIALOG(state->highlight_popover));
+    gtk_popover_popdown(GTK_POPOVER(state->highlight_popover));
     
     GtkListBoxRow *row = gtk_list_box_get_selected_row(GTK_LIST_BOX(state->doc_list));
     if (row) {
@@ -957,19 +937,21 @@ static void show_highlight_dialog_at(CualiAppState *state, int highlight_id)
 
     if (!bounds_valid) return;
 
-    adw_dialog_present(ADW_DIALOG(state->highlight_popover), state->window);
+    GdkRectangle rect;
+    gtk_text_view_get_iter_location(GTK_TEXT_VIEW(state->text_view), &start_iter, &rect);
+    gtk_text_view_buffer_to_window_coords(GTK_TEXT_VIEW(state->text_view), GTK_TEXT_WINDOW_WIDGET, rect.x, rect.y, &rect.x, &rect.y);
+    gtk_popover_set_pointing_to(GTK_POPOVER(state->highlight_popover), &rect);
+    gtk_popover_popup(GTK_POPOVER(state->highlight_popover));
 }
 
 static void build_highlight_dialog(CualiAppState *state)
 {
-    adw_dialog_set_title(ADW_DIALOG(state->highlight_popover), "Highlight");
-    adw_dialog_set_content_width(ADW_DIALOG(state->highlight_popover), 360);
-
-    GtkWidget *toolbar_view = adw_toolbar_view_new();
-    GtkWidget *header_bar = adw_header_bar_new();
-    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view), header_bar);
-
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_size_request(box, 360, -1);
+    gtk_widget_set_margin_start(box, 12);
+    gtk_widget_set_margin_end(box, 12);
+    gtk_widget_set_margin_top(box, 12);
+    gtk_widget_set_margin_bottom(box, 12);
     
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 300);
@@ -1016,8 +998,7 @@ static void build_highlight_dialog(CualiAppState *state)
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(memo_scroll), state->popover_memo_view);
     gtk_box_append(GTK_BOX(box), memo_scroll);
 
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), box);
-    adw_dialog_set_child(ADW_DIALOG(state->highlight_popover), toolbar_view);
+    gtk_popover_set_child(GTK_POPOVER(state->highlight_popover), box);
     g_signal_connect(state->highlight_popover, "closed",
                      G_CALLBACK(on_highlight_dialog_closed), state);
 }
@@ -1973,6 +1954,8 @@ on_project_info_changed (GtkEditable *editable, gpointer user_data)
 static void
 refresh_results_tags (CualiAppState *state)
 {
+  g_signal_handlers_block_by_func(state->results_tag_list, on_results_tag_selected, state);
+  
   GtkWidget *child;
   while ((child = gtk_widget_get_first_child (state->results_tag_list)) != NULL)
     gtk_list_box_remove (GTK_LIST_BOX (state->results_tag_list), child);
@@ -2033,9 +2016,15 @@ refresh_results_tags (CualiAppState *state)
       g_object_set_data(G_OBJECT(row), "tag-id", GINT_TO_POINTER(tag_id));
       g_object_set_data_full (G_OBJECT (row), "tag_path", g_strdup (path), g_free);
       gtk_list_box_append (GTK_LIST_BOX (state->results_tag_list), row);
+      
+      if (state->selected_result_tag && g_strcmp0(path, state->selected_result_tag) == 0) {
+          gtk_list_box_select_row(GTK_LIST_BOX(state->results_tag_list), GTK_LIST_BOX_ROW(row));
+      }
     }
     sqlite3_finalize (stmt);
   }
+  
+  g_signal_handlers_unblock_by_func(state->results_tag_list, on_results_tag_selected, state);
 }
 
 /* ── Etiquetas jerarquicas ── */
@@ -2183,14 +2172,67 @@ flatten_tag_tree (TagNode *n, int depth, GtkListBox *list, CualiAppState *state)
     }
 }
 
+
+static void tag_tree_cell_data_func(GtkTreeViewColumn *col, GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter, gpointer user_data) {
+    char *name = NULL, *color = NULL;
+    int count = 0;
+    gtk_tree_model_get(model, iter, 1, &name, 2, &color, 3, &count, -1);
+    
+    if (!color) color = g_strdup("#77767b");
+    
+    char *markup;
+    if (count > 0) {
+        markup = g_strdup_printf("<span foreground=\"%s\">●</span> %s <span foreground=\"#888888\" size=\"smaller\">(%d)</span>", color, name ? name : "", count);
+    } else {
+        markup = g_strdup_printf("<span foreground=\"%s\">●</span> %s", color, name ? name : "");
+    }
+    
+    g_object_set(renderer, "markup", markup, NULL);
+    
+    if (name) g_free(name);
+    if (color) g_free(color);
+    g_free(markup);
+}
+
+static void on_tag_tree_row_activated(GtkTreeView *tree_view, GtkTreePath *path, GtkTreeViewColumn *column, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    GtkTreeModel *model = gtk_tree_view_get_model(tree_view);
+    GtkTreeIter iter;
+    if (gtk_tree_model_get_iter(model, &iter, path)) {
+        int tag_id = -1;
+        gtk_tree_model_get(model, &iter, 0, &tag_id, -1);
+        if (tag_id > 0) {
+            show_tag_edit_dialog(state, tag_id);
+        }
+    }
+}
+
+static void populate_tag_store(TagNode *n, GtkTreeStore *store, GtkTreeIter *parent_iter) {
+    GtkTreeIter iter;
+    if (n->name) {
+        gtk_tree_store_append(store, &iter, parent_iter);
+        gtk_tree_store_set(store, &iter,
+            0, n->tag_id,
+            1, n->name,
+            2, n->color,
+            3, n->count,
+            -1);
+    }
+    
+    GtkTreeIter *new_parent = n->name ? &iter : parent_iter;
+    for (GList *l = n->children; l; l = l->next) {
+        populate_tag_store((TagNode *)l->data, store, new_parent);
+    }
+}
+
 static void
 refresh_tags (CualiAppState *state)
 {
-    if (!state->tag_list) return;
+    if (!state->tag_tree_store) return;
 
     GtkWidget *child;
-    while ((child = gtk_widget_get_first_child (state->tag_list)))
-        gtk_list_box_remove (GTK_LIST_BOX (state->tag_list), child);
+    //
+        //
 
     sqlite3_stmt *stmt = db_tags_get_stats (state->current_project_id);
     if (!stmt) return;
@@ -2227,11 +2269,15 @@ refresh_tags (CualiAppState *state)
     }
     sqlite3_finalize (stmt);
 
-    /* Flatten tree into list box rows via recursive helper */
-    flatten_tag_tree (&root, 0, GTK_LIST_BOX (state->tag_list), state);
+    if (state->tag_tree_store) {
+        gtk_tree_store_clear(state->tag_tree_store);
+        populate_tag_store(&root, state->tag_tree_store, NULL);
+        gtk_tree_view_expand_all(GTK_TREE_VIEW(state->tag_tree_view));
+    }
 
     g_list_free_full (root.children, (GDestroyNotify) tag_node_free);
     refresh_stats (state);
+    refresh_results_tags (state);
 }
 
 typedef struct {
@@ -3346,6 +3392,31 @@ refresh_results (CualiAppState *state)
       int count = 0;
       int limit = state->results_limit > 0 ? state->results_limit : 200;
       for (guint i = 0; i < len; i++) {
+          ResultRow *res = g_ptr_array_index (state->cached_results, i);
+
+          gboolean match = TRUE;
+          if (state->selected_result_tag) {
+              match = FALSE;
+              if (res->tags_str) {
+                  char **tags = g_strsplit (res->tags_str, "@@@", -1);
+                  size_t sel_len = strlen (state->selected_result_tag);
+                  for (int j = 0; tags[j]; j++) {
+                      char **parts = g_strsplit (tags[j], "|||", 2);
+                      if (parts[0]) {
+                          if (g_strcmp0 (parts[0], state->selected_result_tag) == 0 ||
+                              (strncmp (parts[0], state->selected_result_tag, sel_len) == 0 &&
+                               parts[0][sel_len] == '/')) {
+                              match = TRUE;
+                          }
+                      }
+                      g_strfreev (parts);
+                      if (match) break;
+                  }
+                  g_strfreev (tags);
+              }
+          }
+          if (!match) continue;
+
           if (count >= limit) {
               GtkWidget *load_more_row = gtk_list_box_row_new ();
               gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (load_more_row), FALSE);
@@ -3359,7 +3430,7 @@ refresh_results (CualiAppState *state)
               gtk_list_box_append (GTK_LIST_BOX (state->results_list), load_more_row);
               break;
           }
-          ResultRow *res = g_ptr_array_index (state->cached_results, i);
+
           const char *snippet = res->snippet;
           const char *doc_name = res->doc_name;
           const char *tags_str = res->tags_str;
@@ -3461,7 +3532,6 @@ refresh_results (CualiAppState *state)
           count++;
       }
   }
-  refresh_results_tags (state);
   refresh_stats (state);
 }
 
@@ -4696,10 +4766,9 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_box_append (GTK_BOX (main_view_box), state->view_stack);
     gtk_widget_set_vexpand (state->view_stack, TRUE);
     
-    GtkWidget *view_switcher = adw_view_switcher_new ();
-    adw_view_switcher_set_stack (ADW_VIEW_SWITCHER (view_switcher), ADW_VIEW_STACK (state->view_stack));
-    adw_view_switcher_set_policy (ADW_VIEW_SWITCHER (view_switcher), ADW_VIEW_SWITCHER_POLICY_WIDE);
-    adw_header_bar_set_title_widget (ADW_HEADER_BAR (header_bar), view_switcher);
+    GtkWidget *view_switcher_title = adw_view_switcher_title_new ();
+    adw_view_switcher_title_set_stack (ADW_VIEW_SWITCHER_TITLE (view_switcher_title), ADW_VIEW_STACK (state->view_stack));
+    adw_header_bar_set_title_widget (ADW_HEADER_BAR (header_bar), view_switcher_title);
 
     GtkWidget *hl_button = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/format-text-underline-symbolic.svg");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), hl_button);
@@ -4869,15 +4938,30 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_widget_set_vexpand (scrolled_tags, TRUE);
     gtk_box_append (GTK_BOX (sidebar_box), scrolled_tags);
 
-    state->tag_list = gtk_list_box_new ();
-    gtk_widget_add_css_class (state->tag_list, "sidebar-list");
-    gtk_widget_add_css_class (state->tag_list, "boxed-list");
-    gtk_list_box_set_selection_mode (GTK_LIST_BOX (state->tag_list), GTK_SELECTION_NONE);
-    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_tags), state->tag_list);
+    state->tag_tree_store = gtk_tree_store_new(4, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT);
+    state->tag_tree_view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(state->tag_tree_store));
+    g_object_unref(state->tag_tree_store);
+    
+    gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(state->tag_tree_view), FALSE);
+    gtk_widget_add_css_class(state->tag_tree_view, "sidebar-list");
+    
+    GtkTreeViewColumn *col = gtk_tree_view_column_new();
+    GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+    gtk_tree_view_column_pack_start(col, renderer, TRUE);
+    gtk_tree_view_column_set_cell_data_func(col, renderer, tag_tree_cell_data_func, NULL, NULL);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(state->tag_tree_view), col);
+    
+    g_signal_connect(state->tag_tree_view, "row-activated", G_CALLBACK(on_tag_tree_row_activated), state);
+    
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_tags), state->tag_tree_view);
 
     /* Content view with toolbar */
     GtkWidget *doc_content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
     adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(split_view), doc_content_vbox);
+
+    GtkWidget *banner = adw_banner_new("Selecciona texto para etiquetar un segmento");
+    adw_banner_set_revealed(ADW_BANNER(banner), TRUE);
+    gtk_box_append(GTK_BOX(doc_content_vbox), banner);
 
     GtkWidget *doc_toolbar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class (doc_toolbar, "toolbar");
@@ -4983,7 +5067,10 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     g_signal_connect (buffer, "delete-range", G_CALLBACK (on_delete_range),  state);
     
     /* Create dialogs once */
-    state->highlight_popover = GTK_WIDGET(adw_dialog_new());
+    state->highlight_popover = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(state->highlight_popover), TRUE);
+    gtk_popover_set_position(GTK_POPOVER(state->highlight_popover), GTK_POS_BOTTOM);
+    gtk_widget_set_parent(state->highlight_popover, text_view);
     build_highlight_dialog(state);
 
     state->highlight_selector = GTK_WIDGET(adw_dialog_new());
