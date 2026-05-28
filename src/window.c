@@ -1766,6 +1766,21 @@ static void
 on_window_destroy (GtkWidget *widget, gpointer user_data)
 {
     db_close ();
+    
+    // Attempt to save last highlight id to a file so it persists
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (state) {
+        char *path = g_build_filename(g_get_home_dir(), ".cuali_last_hl", NULL);
+        char *content = g_strdup_printf("%d", state->revision_highlight_id);
+        g_file_set_contents(path, content, -1, NULL);
+        g_free(content);
+        g_free(path);
+    }
+    
+    GApplication *app = g_application_get_default ();
+    if (app) {
+        g_application_quit (app);
+    }
 }
 
 static gboolean
@@ -2915,9 +2930,21 @@ refresh_revision_list (CualiAppState *state)
     refresh_revision_doc_filter_list (state);
 
     // Remember currently selected highlight_id to restore selection if possible
-    int prev_selected_id = 0;
+    int prev_selected_id = state->revision_highlight_id;
+    if (prev_selected_id == 0) {
+        // Try to load from file on first run
+        char *path = g_build_filename(g_get_home_dir(), ".cuali_last_hl", NULL);
+        char *content = NULL;
+        if (g_file_get_contents(path, &content, NULL, NULL)) {
+            prev_selected_id = atoi(content);
+            state->revision_highlight_id = prev_selected_id;
+            g_free(content);
+        }
+        g_free(path);
+    }
+    
     GtkListBoxRow *sel_row = gtk_list_box_get_selected_row (GTK_LIST_BOX (state->revision_list));
-    if (sel_row) {
+    if (sel_row && prev_selected_id == 0) {
         prev_selected_id = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (sel_row), "highlight_id"));
     }
 
@@ -4685,7 +4712,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_window_set_title(GTK_WINDOW(window), "Cuali GTK");
     gtk_window_set_default_size(GTK_WINDOW(window), 1100, 800);
     g_signal_connect (window, "close-request", G_CALLBACK (on_window_close_request), state);
-    g_signal_connect (window, "destroy", G_CALLBACK (on_window_destroy), NULL);
+    g_signal_connect (window, "destroy", G_CALLBACK (on_window_destroy), state);
 
     state->root_stack = adw_view_stack_new ();
     gtk_widget_set_vexpand (state->root_stack, TRUE);
@@ -5198,7 +5225,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     state->revision_doc_filter_list = gtk_list_box_new ();
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (state->revision_doc_filter_list), GTK_SELECTION_NONE);
     gtk_widget_add_css_class (state->revision_doc_filter_list, "navigation-sidebar");
-    g_signal_connect (state->revision_doc_filter_list, "row-selected", G_CALLBACK (on_revision_doc_filter_selected), state);
+    g_signal_connect (state->revision_doc_filter_list, "row-activated", G_CALLBACK (on_revision_doc_filter_selected), state);
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (filter_scroll), state->revision_doc_filter_list);
 
     state->revision_sidebar_search_entry = GTK_WIDGET (gtk_search_entry_new ());

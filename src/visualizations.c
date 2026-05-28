@@ -1,6 +1,7 @@
 #include "visualizations.h"
 #include "database.h"
 #include <cairo.h>
+#include <cairo-svg.h>
 #include <pango/pangocairo.h>
 #include <adwaita.h>
 #include <math.h>
@@ -1154,6 +1155,53 @@ GtkWidget* create_wordcloud_view(CualiAppState *state) {
     return scroll;
 }
 
+// --- Export Logic ---
+static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpointer user_data) {
+    GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), res, NULL);
+    if (!file) return;
+
+    char *path = g_file_get_path(file);
+    g_object_unref(file);
+    if (!path) return;
+
+    const char *viz_type = (const char *)user_data;
+
+    if (g_strcmp0(viz_type, "heatmap") == 0 && g_hm_state && g_hm_area) {
+        double current_zoom = ((HeatmapState *)g_hm_state)->zoom;
+        int width = 1200 * current_zoom;
+        int height = (((HeatmapState *)g_hm_state)->num_tags * 35 + 100) * current_zoom;
+        cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
+        cairo_t *cr = cairo_create(surface);
+        
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_paint(cr);
+        
+        draw_heatmap(GTK_DRAWING_AREA(g_hm_area), cr, width, height, g_hm_state);
+        
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
+    }
+    
+    g_free(path);
+}
+
+static void on_export_viz_clicked(GtkButton *btn, gpointer user_data) {
+    GtkWidget *viz_stack = GTK_WIDGET(user_data);
+    const char *visible_child_name = adw_view_stack_get_visible_child_name(ADW_VIEW_STACK(viz_stack));
+    
+    if (g_strcmp0(visible_child_name, "heatmap") != 0) {
+        return; // For now only heatmap export is supported
+    }
+    
+    GtkFileDialog *dlg = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dlg, "Exportar Co-ocurrencia a SVG");
+    gtk_file_dialog_set_initial_name(dlg, "co-ocurrencia.svg");
+    
+    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(btn));
+    gtk_file_dialog_save(dlg, GTK_WINDOW(root), NULL, on_export_viz_save_response, (gpointer)"heatmap");
+    g_object_unref(dlg);
+}
+
 // --- Main Visualizations View ---
 static void on_filter_changed(GtkRange *range, gpointer user_data) {
     CualiAppState *state = (CualiAppState *)user_data;
@@ -1196,6 +1244,11 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(filter_btn), popover);
     
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), filter_btn);
+    
+    GtkWidget *export_btn = gtk_button_new_from_icon_name("document-save-symbolic");
+    gtk_widget_set_tooltip_text(export_btn, "Exportar visualización a SVG");
+    g_signal_connect(export_btn, "clicked", G_CALLBACK(on_export_viz_clicked), viz_stack);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), export_btn);
     
     // 1. Networks
     GtkWidget *wb_view = create_whiteboard_view(state);
