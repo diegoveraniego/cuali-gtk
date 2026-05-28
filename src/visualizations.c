@@ -533,28 +533,23 @@ static void free_heatmap_data(HeatmapState *hm) {
 }
 
 static void get_category_color(const char *tag_name, double *r, double *g, double *b) {
+    const char *colors[] = {
+        "#3584e4", "#33d17a", "#f6d32d", "#ff7800", 
+        "#e01b24", "#9141ac", "#986a44", "#3d3846"
+    };
+    
     const char *slash = strchr(tag_name, '/');
     int len = slash ? (slash - tag_name) : strlen(tag_name);
     unsigned int hash = 0;
     for (int i = 0; i < len; i++) {
         hash = hash * 31 + tag_name[i];
     }
-    double h = (hash % 360) / 360.0;
-    
-    // hsv to rgb (v=0.8, s=0.6)
-    int i = (int)(h * 6);
-    double f = h * 6 - i;
-    double p = 0.8 * (1 - 0.6);
-    double q = 0.8 * (1 - f * 0.6);
-    double t = 0.8 * (1 - (1 - f) * 0.6);
-    switch(i % 6) {
-        case 0: *r=0.8, *g=t, *b=p; break;
-        case 1: *r=q, *g=0.8, *b=p; break;
-        case 2: *r=p, *g=0.8, *b=t; break;
-        case 3: *r=p, *g=q, *b=0.8; break;
-        case 4: *r=t, *g=p, *b=0.8; break;
-        case 5: *r=0.8, *g=p, *b=q; break;
-    }
+    const char *hex = colors[hash % 8];
+    int ri, gi, bi;
+    sscanf(hex + 1, "%02x%02x%02x", &ri, &gi, &bi);
+    *r = ri / 255.0;
+    *g = gi / 255.0;
+    *b = bi / 255.0;
 }
 
 typedef struct {
@@ -777,11 +772,15 @@ static void draw_heatmap(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     }
     
     int margin_x = max_text_w + 40;
-    int offset_y = 50;
     
     cairo_scale(cr, hm->zoom, hm->zoom);
     width = width / hm->zoom;
     height = height / hm->zoom;
+
+    // Safety: margin_x shouldn't exceed 40% of width
+    if (margin_x > width * 0.4) margin_x = width * 0.4;
+    
+    int offset_y = 50;
     
     // Allocate Sankey data
     SankeyNode *left = g_new0(SankeyNode, n);
@@ -853,6 +852,8 @@ static void draw_heatmap(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
         pango_layout_set_text(layout, hm->tag_names[orig], -1);
         PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 10");
         pango_layout_set_font_description(layout, desc);
+        pango_layout_set_width(layout, (margin_x - 25) * PANGO_SCALE);
+        pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
         pango_font_description_free(desc);
         
         int tw, th;
@@ -886,6 +887,8 @@ static void draw_heatmap(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
         pango_layout_set_text(layout, hm->tag_names[orig], -1);
         PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 10");
         pango_layout_set_font_description(layout, desc);
+        pango_layout_set_width(layout, (margin_x - 25) * PANGO_SCALE);
+        pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
         pango_font_description_free(desc);
         
         int tw, th;
