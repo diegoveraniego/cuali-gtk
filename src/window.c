@@ -6,6 +6,7 @@
 #include <sqlite3.h>
 #include <string.h>
 #include <math.h>
+#include "visualizations.h"
 
 const char *style_css = 
   "* { font-family: \"Inter\", sans-serif; }"
@@ -1761,6 +1762,12 @@ on_alert_response (AdwAlertDialog *self, const char *response, gpointer user_dat
     }
 }
 
+static void
+on_window_destroy (GtkWidget *widget, gpointer user_data)
+{
+    db_close ();
+}
+
 static gboolean
 on_window_close_request (GtkWindow *window, gpointer user_data)
 {
@@ -2278,6 +2285,7 @@ refresh_tags (CualiAppState *state)
     g_list_free_full (root.children, (GDestroyNotify) tag_node_free);
     refresh_stats (state);
     refresh_results_tags (state);
+    refresh_visualizations (state);
 }
 
 typedef struct {
@@ -3657,23 +3665,32 @@ on_export_csv_save_response (GObject *source, GAsyncResult *res, gpointer user_d
 }
 
 static void
-do_export_csv (CualiAppState *state, gboolean codebook)
+do_export_csv (CualiAppState *state, int export_type)
 {
     if (state->current_project_id <= 0) return;
     gpointer *args = g_new (gpointer, 2);
     args[0] = state;
-    args[1] = GINT_TO_POINTER ((int)codebook);
+    args[1] = GINT_TO_POINTER (export_type);
 
     GtkFileDialog *dlg = gtk_file_dialog_new ();
-    gtk_file_dialog_set_title (dlg, codebook ? "Export codebook" : "Export highlights");
-    gtk_file_dialog_set_initial_name (dlg, codebook ? "codebook.csv" : "highlights.csv");
+    if (export_type == 1) {
+        gtk_file_dialog_set_title (dlg, "Export codebook");
+        gtk_file_dialog_set_initial_name (dlg, "codebook.csv");
+    } else if (export_type == 2) {
+        gtk_file_dialog_set_title (dlg, "Export thematic table");
+        gtk_file_dialog_set_initial_name (dlg, "thematic_table.html");
+    } else {
+        gtk_file_dialog_set_title (dlg, "Export highlights");
+        gtk_file_dialog_set_initial_name (dlg, "highlights.csv");
+    }
     gtk_file_dialog_save (dlg, GTK_WINDOW (state->window), NULL,
                           on_export_csv_save_response, args);
     g_object_unref (dlg);
 }
 
-static void on_export_csv_clicked      (GtkButton *b, gpointer u) { do_export_csv ((CualiAppState*)u, FALSE); }
-static void on_export_codebook_clicked (GtkButton *b, gpointer u) { do_export_csv ((CualiAppState*)u, TRUE);  }
+static void on_export_csv_clicked      (GtkButton *b, gpointer u) { do_export_csv ((CualiAppState*)u, 0); }
+static void on_export_codebook_clicked (GtkButton *b, gpointer u) { do_export_csv ((CualiAppState*)u, 1);  }
+static void on_export_thematic_clicked (GtkButton *b, gpointer u) { do_export_csv ((CualiAppState*)u, 2);  }
 
 static void
 on_doc_imported (GObject *source_object, GAsyncResult *res, gpointer user_data)
@@ -4668,6 +4685,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_window_set_title(GTK_WINDOW(window), "Cuali GTK");
     gtk_window_set_default_size(GTK_WINDOW(window), 1100, 800);
     g_signal_connect (window, "close-request", G_CALLBACK (on_window_close_request), state);
+    g_signal_connect (window, "destroy", G_CALLBACK (on_window_destroy), NULL);
 
     state->root_stack = adw_view_stack_new ();
     gtk_widget_set_vexpand (state->root_stack, TRUE);
@@ -4769,6 +4787,11 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     GtkWidget *view_switcher_title = adw_view_switcher_title_new ();
     adw_view_switcher_title_set_stack (ADW_VIEW_SWITCHER_TITLE (view_switcher_title), ADW_VIEW_STACK (state->view_stack));
     adw_header_bar_set_title_widget (ADW_HEADER_BAR (header_bar), view_switcher_title);
+    
+    GtkWidget *switcher_bar = adw_view_switcher_bar_new ();
+    adw_view_switcher_bar_set_stack (ADW_VIEW_SWITCHER_BAR (switcher_bar), ADW_VIEW_STACK (state->view_stack));
+    gtk_box_append (GTK_BOX (main_view_box), switcher_bar);
+    g_object_bind_property (view_switcher_title, "title-visible", switcher_bar, "reveal", G_BINDING_SYNC_CREATE);
 
     GtkWidget *hl_button = create_resource_icon_button ("resource:///org/cuali/icons/scalable/actions/format-text-underline-symbolic.svg");
     adw_header_bar_pack_start (ADW_HEADER_BAR (header_bar), hl_button);
@@ -4828,6 +4851,13 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_widget_add_css_class (export_cb_item, "flat");
     g_signal_connect (export_cb_item, "clicked", G_CALLBACK (on_export_codebook_clicked), state);
     gtk_box_append (GTK_BOX (menu_box), export_cb_item);
+
+    GtkWidget *export_thm_item = gtk_button_new_with_label ("Export thematic table (HTML) 🛈");
+    gtk_widget_set_tooltip_text(export_thm_item, "Calcula la frecuencia real de citas únicas por tema, evitando contar un mismo párrafo dos veces si tiene múltiples etiquetas del mismo tema.");
+    gtk_widget_set_halign (export_thm_item, GTK_ALIGN_START);
+    gtk_widget_add_css_class (export_thm_item, "flat");
+    g_signal_connect (export_thm_item, "clicked", G_CALLBACK (on_export_thematic_clicked), state);
+    gtk_box_append (GTK_BOX (menu_box), export_thm_item);
 
     GtkWidget *clear_tags_item = gtk_button_new_with_label ("Clear all highlights & tags");
     gtk_widget_set_halign (clear_tags_item, GTK_ALIGN_START);
@@ -5411,6 +5441,11 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     GtkWidget *results_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), results_box, "results", "Results");
     adw_view_stack_page_set_icon_name (page, "cuali-results-symbolic");
+
+    /* 5. Visualizations View */
+    GtkWidget *viz_view = create_visualizations_view(state);
+    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), viz_view, "visualizations", "Visualizations");
+    adw_view_stack_page_set_icon_name (page, "view-grid-symbolic");
 
     GtkWidget *res_split_view = adw_overlay_split_view_new();
     gtk_box_append(GTK_BOX(results_box), res_split_view);
