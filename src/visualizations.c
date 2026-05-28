@@ -1197,25 +1197,25 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), filter_btn);
     
-    // 1. Whiteboard
+    // 1. Networks
     GtkWidget *wb_view = create_whiteboard_view(state);
-    AdwViewStackPage *p1 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), wb_view, "whiteboard", "Redes");
-    adw_view_stack_page_set_icon_name(p1, "cuali-network-symbolic");
+    AdwViewStackPage *p1 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), wb_view, "whiteboard", "Networks");
+    adw_view_stack_page_set_icon_name(p1, "com.github.maoschanz.drawing-symbolic");
     
     // 2. Sankey (replaces Heatmap)
     GtkWidget *hm_view = create_heatmap_view(state);
-    AdwViewStackPage *p2 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), hm_view, "heatmap", "Co-ocurrencia");
+    AdwViewStackPage *p2 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), hm_view, "heatmap", "Co-occurrence");
     adw_view_stack_page_set_icon_name(p2, "view-grid-symbolic");
     
-    // 3. Matriz (Placeholder for now)
+    // 3. Matrix
     GtkWidget *mat_view = create_matrix_view(state);
-    AdwViewStackPage *p3 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), mat_view, "matrix", "Código-Documento");
+    AdwViewStackPage *p3 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), mat_view, "matrix", "Code-Document Matrix");
     adw_view_stack_page_set_icon_name(p3, "view-list-symbolic");
     
     // 4. Wordcloud
     GtkWidget *wc_view = create_wordcloud_view(state);
-    AdwViewStackPage *p4 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), wc_view, "wordcloud", "Frecuencias");
-    adw_view_stack_page_set_icon_name(p4, "format-text-larger-symbolic");
+    AdwViewStackPage *p4 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), wc_view, "wordcloud", "Frequencies");
+    adw_view_stack_page_set_icon_name(p4, "draw-text-symbolic");
     
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), viz_stack);
     
