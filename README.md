@@ -140,8 +140,12 @@ cuali-gtk/
 
 ## Roadmap
 
+- [x] Co-occurrence: Real Sankey engine with barycenter relaxation
+- [x] Code-Document Matrix: Interactive heatmap view
+- [x] Word Cloud: Frequency spiral with HTML cleaning
+- [ ] NLP improvements: Add stemming and lemmatization for more accurate word frequencies (currently using raw word counts)
+- [ ] Networks view: Missing icon and functionality (deferred)
 - [ ] Multi-language support (i18n)
-- [ ] Data visualization page (dont know if making a new app for this or using GNOME Graphs, as it is a different funcitonality different than tagging and reviewing)
 - [ ] Make demo project for people testing
       
 ## Contributing & Support
