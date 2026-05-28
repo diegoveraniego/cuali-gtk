@@ -171,7 +171,7 @@ static GtkWidget *g_hm_area = NULL;
 static void *g_hm_state = NULL;
 static GtkWidget *g_mat_area = NULL;
 static void *g_mat_state = NULL;
-static GtkWidget *g_wc_box = NULL;
+
 
 // --- Whiteboard Logic ---
 
@@ -797,8 +797,6 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
     
     int cell_width = 45;
     int cell_height = 30;
-    int offset_x = 180;
-    int offset_y = 150;
     int gap = 2;
     
     int max_val = 1;
@@ -806,6 +804,49 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
         for(int j = 0; j < td->num_docs; j++) {
             if(td->matrix[i][j] > max_val) max_val = td->matrix[i][j];
         }
+    }
+    
+    // Calculate max text width for tags
+    int max_tag_w = 0;
+    for(int i = 0; i < td->num_tags; i++) {
+        PangoLayout *layout = pango_cairo_create_layout(cr);
+        pango_layout_set_text(layout, td->tag_names[i], -1);
+        PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 10");
+        pango_layout_set_font_description(layout, desc);
+        int tw, th;
+        pango_layout_get_pixel_size(layout, &tw, &th);
+        if (tw > max_tag_w) max_tag_w = tw;
+        pango_font_description_free(desc);
+        g_object_unref(layout);
+    }
+    
+    // Calculate max text width for docs (angled)
+    int max_doc_w = 0;
+    for(int j = 0; j < td->num_docs; j++) {
+        PangoLayout *layout = pango_cairo_create_layout(cr);
+        pango_layout_set_text(layout, td->doc_names[j], -1);
+        PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 10");
+        pango_layout_set_font_description(layout, desc);
+        int tw, th;
+        pango_layout_get_pixel_size(layout, &tw, &th);
+        if (tw > max_doc_w) max_doc_w = tw;
+        pango_font_description_free(desc);
+        g_object_unref(layout);
+    }
+    
+    // Angled at 45 degrees, vertical space needed is sin(45) * width
+    int doc_header_height = (int)(max_doc_w * 0.707) + 40;
+    
+    int base_offset_x = max_tag_w + 40;
+    int total_matrix_w = td->num_docs * (cell_width + gap);
+    int total_viz_w = base_offset_x + total_matrix_w;
+    
+    int offset_x = base_offset_x;
+    int offset_y = doc_header_height;
+    
+    // Centering calculation for the whole block
+    if (total_viz_w < width) {
+        offset_x += (width - total_viz_w) / 2;
     }
     
     GdkRGBA fg_color;
@@ -820,7 +861,7 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
         
         int tw, th;
         pango_layout_get_pixel_size(layout, &tw, &th);
-        cairo_move_to(cr, offset_x - 15 - tw, offset_y + i * (cell_height + gap) + (cell_height - th)/2.0);
+        cairo_move_to(cr, offset_x - 20 - tw, offset_y + i * (cell_height + gap) + (cell_height - th)/2.0);
         cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
         pango_cairo_show_layout(cr, layout);
         g_object_unref(layout);
@@ -828,6 +869,7 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
         for(int j = 0; j < td->num_docs; j++) {
             if (i == 0) {
                 cairo_save(cr);
+                // Position for angled doc labels: center of cell, slightly above matrix
                 cairo_translate(cr, offset_x + j * (cell_width + gap) + cell_width/2.0, offset_y - 10);
                 cairo_rotate(cr, -G_PI / 4.0);
                 
@@ -837,7 +879,11 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
                 pango_layout_set_font_description(hl, hdesc);
                 pango_font_description_free(hdesc);
                 
-                cairo_move_to(cr, 0, -10);
+                int dtw, dth;
+                pango_layout_get_pixel_size(hl, &dtw, &dth);
+                // Move text so its end (right side) is near the anchor point if rotating, 
+                // but here we just want it to extend upwards.
+                cairo_move_to(cr, 0, -5); 
                 cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
                 pango_cairo_show_layout(cr, hl);
                 g_object_unref(hl);
@@ -869,7 +915,6 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
                 int vw, vh;
                 pango_layout_get_pixel_size(vl, &vw, &vh);
                 
-                // Contrast text color
                 if (val > max_val * 0.5) cairo_set_source_rgb(cr, 1, 1, 1);
                 else cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
                 
@@ -903,25 +948,57 @@ typedef struct {
     int freq;
 } WordFreq;
 
+typedef struct {
+    double x, y, w, h;
+} BoundingBox;
+
+typedef struct {
+    GList *words; // List of WordFreq
+    int max_freq;
+    double zoom;
+    int width, height;
+} WordCloudState;
+
 static gint compare_word_freq(gconstpointer a, gconstpointer b) {
     return ((WordFreq*)b)->freq - ((WordFreq*)a)->freq;
 }
 
-static void populate_wordcloud(CualiAppState *state, GtkWidget *box) {
-    GtkWidget *child;
-    while ((child = gtk_widget_get_first_child (box)) != NULL)
-        gtk_flow_box_remove (GTK_FLOW_BOX (box), child);
+static char *strip_html(const char *html) {
+    if (!html) return NULL;
+    GString *out = g_string_new("");
+    int intag = 0;
+    for (const char *p = html; *p; p++) {
+        if (*p == '<') intag = 1;
+        else if (*p == '>') {
+            intag = 0;
+            g_string_append_c(out, ' '); // Space to separate content
+        } else if (!intag) {
+            // Handle common entities
+            if (strncmp(p, "&nbsp;", 6) == 0) { g_string_append_c(out, ' '); p += 5; }
+            else if (strncmp(p, "&lt;", 4) == 0) { g_string_append_c(out, '<'); p += 3; }
+            else if (strncmp(p, "&gt;", 4) == 0) { g_string_append_c(out, '>'); p += 3; }
+            else if (strncmp(p, "&amp;", 5) == 0) { g_string_append_c(out, '&'); p += 4; }
+            else g_string_append_c(out, *p);
+        }
+    }
+    return g_string_free(out, FALSE);
+}
 
+static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
+    wc->words = NULL;
+    wc->max_freq = 1;
+    wc->zoom = 1.0;
+    
     GHashTable *counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    sqlite3_stmt *stmt = db_documents_get_all_contents(state->current_project_id);
+    sqlite3_stmt *stmt = db_documents_get_all_contents(app_state->current_project_id);
     if(stmt) {
         while(sqlite3_step(stmt) == SQLITE_ROW) {
-            const char *text = (const char*)sqlite3_column_text(stmt, 0);
-            if(!text) continue;
+            const char *html = (const char*)sqlite3_column_text(stmt, 0);
+            if(!html) continue;
             
-            // Very naive split
+            char *text = strip_html(html);
             char *lower = g_utf8_strdown(text, -1);
-            char **words = g_strsplit_set(lower, " \n\t.,;:!?()\"'", -1);
+            char **words = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>", -1);
             for(int i = 0; words[i] != NULL; i++) {
                 if(strlen(words[i]) > 2) {
                     if(!g_hash_table_contains(stop_words_set, words[i])) {
@@ -933,87 +1010,153 @@ static void populate_wordcloud(CualiAppState *state, GtkWidget *box) {
             }
             g_strfreev(words);
             g_free(lower);
+            g_free(text);
         }
         sqlite3_finalize(stmt);
     }
     
     GList *keys = g_hash_table_get_keys(counts);
-    GList *list = NULL;
     for(GList *l = keys; l != NULL; l = l->next) {
         WordFreq *wf = g_new(WordFreq, 1);
         wf->word = g_strdup(l->data);
         wf->freq = GPOINTER_TO_INT(g_hash_table_lookup(counts, l->data));
-        list = g_list_append(list, wf);
+        wc->words = g_list_append(wc->words, wf);
     }
     g_hash_table_destroy(counts);
 
-    list = g_list_sort(list, compare_word_freq);
-    
-    int max_freq = list ? ((WordFreq*)list->data)->freq : 1;
-    
-    int i = 0;
-    for(GList *l = list; l != NULL && i < 100; l = l->next, i++) {
+    wc->words = g_list_sort(wc->words, compare_word_freq);
+    if (wc->words) {
+        wc->max_freq = ((WordFreq*)wc->words->data)->freq;
+    }
+}
+
+static void free_wordcloud_data(WordCloudState *wc) {
+    for (GList *l = wc->words; l != NULL; l = l->next) {
         WordFreq *wf = l->data;
-        GtkWidget *lbl = gtk_label_new(wf->word);
-        
-        double scale = 1.0 + (3.0 * wf->freq / max_freq);
-        char *css = g_strdup_printf("label { font-size: %dpt; font-weight: %s; opacity: %f; }", 
-                                   (int)(10 * scale), 
-                                   scale > 2.0 ? "bold" : "normal",
-                                   fmax(0.4, (double)wf->freq/max_freq));
-        
-        GtkCssProvider *prov = gtk_css_provider_new();
-        gtk_css_provider_load_from_string(prov, css);
-        gtk_style_context_add_provider(gtk_widget_get_style_context(lbl), GTK_STYLE_PROVIDER(prov), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        
-        gtk_flow_box_append(GTK_FLOW_BOX(box), lbl);
-        
-        g_free(css);
-        g_object_unref(prov);
         g_free(wf->word);
         g_free(wf);
     }
-    g_list_free(list);
-    g_list_free(keys);
+    g_list_free(wc->words);
+    wc->words = NULL;
 }
+
+static gboolean check_collision(BoundingBox *boxes, int num_boxes, double x, double y, double w, double h) {
+    for (int i = 0; i < num_boxes; i++) {
+        if (x < boxes[i].x + boxes[i].w &&
+            x + w > boxes[i].x &&
+            y < boxes[i].y + boxes[i].h &&
+            y + h > boxes[i].y) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static void draw_wordcloud(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    WordCloudState *wc = (WordCloudState *)user_data;
+    
+    // Transparent background
+    
+    int max_words = 100;
+    BoundingBox boxes[max_words];
+    int num_boxes = 0;
+    
+    double center_x = width / 2.0;
+    double center_y = height / 2.0;
+    
+    cairo_scale(cr, wc->zoom, wc->zoom);
+    center_x /= wc->zoom;
+    center_y /= wc->zoom;
+    
+    GdkRGBA fg_color;
+    gtk_style_context_lookup_color(gtk_widget_get_style_context(GTK_WIDGET(area)), "theme_fg_color", &fg_color);
+    
+    int i = 0;
+    for(GList *l = wc->words; l != NULL && i < max_words; l = l->next) {
+        WordFreq *wf = l->data;
+        
+        PangoLayout *layout = pango_cairo_create_layout(cr);
+        pango_layout_set_text(layout, wf->word, -1);
+        
+        double scale = 1.0 + (5.0 * wf->freq / wc->max_freq);
+        char font_str[64];
+        snprintf(font_str, sizeof(font_str), "Inter, Cantarell %s %d", scale > 2.5 ? "Bold" : "Normal", (int)(10 * scale));
+        PangoFontDescription *desc = pango_font_description_from_string(font_str);
+        pango_layout_set_font_description(layout, desc);
+        pango_font_description_free(desc);
+        
+        int tw, th;
+        pango_layout_get_pixel_size(layout, &tw, &th);
+        
+        // Archimedean spiral placement
+        double angle = 0;
+        double radius = 0;
+        double x = center_x - tw/2.0;
+        double y = center_y - th/2.0;
+        
+        while (check_collision(boxes, num_boxes, x, y, tw, th)) {
+            radius += 1.0;
+            angle += 0.5;
+            x = center_x + radius * cos(angle) - tw/2.0;
+            y = center_y + radius * sin(angle) - th/2.0;
+        }
+        
+        boxes[num_boxes].x = x;
+        boxes[num_boxes].y = y;
+        boxes[num_boxes].w = tw;
+        boxes[num_boxes].h = th;
+        num_boxes++;
+        
+        cairo_move_to(cr, x, y);
+        
+        double opacity = fmax(0.3, (double)wf->freq / wc->max_freq);
+        if (i == 0) opacity = 1.0; // Max word is fully opaque
+        cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, opacity);
+        
+        pango_cairo_show_layout(cr, layout);
+        g_object_unref(layout);
+        i++;
+    }
+}
+
+static gboolean on_wc_scroll(GtkEventControllerScroll *scroll, double dx, double dy, gpointer user_data) {
+    WordCloudState *wc = (WordCloudState *)user_data;
+    if (dy > 0) wc->zoom *= 0.9;
+    else if (dy < 0) wc->zoom *= 1.1;
+    wc->zoom = fmax(0.1, fmin(wc->zoom, 5.0));
+    
+    GtkWidget *area = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(scroll));
+    gtk_widget_queue_draw(area);
+    return TRUE;
+}
+
+static WordCloudState *g_wc_state = NULL;
+static GtkWidget *g_wc_area = NULL;
 
 GtkWidget* create_wordcloud_view(CualiAppState *state) {
     init_stopwords();
     
-    GtkWidget *box = gtk_flow_box_new();
-    gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
-    gtk_widget_set_margin_top(box, 32);
-    gtk_widget_set_margin_bottom(box, 32);
-    g_wc_box = box;
+    WordCloudState *wc = g_new0(WordCloudState, 1);
+    load_wordcloud_data(state, wc);
+    g_wc_state = wc;
     
-    populate_wordcloud(state, box);
+    GtkWidget *area = gtk_drawing_area_new();
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw_wordcloud, wc, NULL);
+    gtk_widget_set_size_request(area, 800, 600);
+    g_wc_area = area;
     
-    // Wrap in AdwClamp for nice GNOME margins
-    GtkWidget *clamp = adw_clamp_new();
-    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 800);
-    
-    // Wrap in a card
-    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_add_css_class(card, "card");
-    gtk_box_append(GTK_BOX(card), box);
-    
-    adw_clamp_set_child(ADW_CLAMP(clamp), card);
+    GtkEventController *scroll_ctrl = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+    g_signal_connect(scroll_ctrl, "scroll", G_CALLBACK(on_wc_scroll), wc);
+    gtk_widget_add_controller(area, scroll_ctrl);
     
     GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_widget_set_vexpand(scroll, TRUE);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
-    
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), area);
     return scroll;
 }
 
 // --- Main Visualizations View ---
-
 static void on_filter_changed(GtkRange *range, gpointer user_data) {
     CualiAppState *state = (CualiAppState *)user_data;
-    double val = gtk_range_get_value(range);
-    // In a real implementation this would trigger a requery with a frequency threshold.
-    // For now we just trigger a UI refresh to show responsiveness.
     refresh_visualizations(state);
 }
 
@@ -1104,7 +1247,9 @@ void refresh_visualizations(CualiAppState *state) {
         }
     }
     
-    if (g_wc_box) {
-        populate_wordcloud(state, g_wc_box);
+    if (g_wc_state) {
+        free_wordcloud_data((WordCloudState *)g_wc_state);
+        load_wordcloud_data(state, (WordCloudState *)g_wc_state);
+        if (g_wc_area) gtk_widget_queue_draw(g_wc_area);
     }
 }
