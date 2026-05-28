@@ -583,61 +583,105 @@ static int find_node_by_orig(SankeyNode *nodes, int n, int orig) {
     return -1;
 }
 
+// Helper to compare tags by category then name for initial grouping
+static int compare_tags_grouping(const void *a, const void *b, gpointer user_data) {
+    HeatmapState *hm = (HeatmapState *)user_data;
+    int i1 = *(int*)a;
+    int i2 = *(int*)b;
+    const char *n1 = hm->tag_names[i1];
+    const char *n2 = hm->tag_names[i2];
+    
+    // Extract categories
+    const char *s1 = strchr(n1, '/');
+    const char *s2 = strchr(n2, '/');
+    int len1 = s1 ? (s1 - n1) : strlen(n1);
+    int len2 = s2 ? (s2 - n2) : strlen(n2);
+    
+    int cmp = strncmp(n1, n2, fmin(len1, len2));
+    if (cmp == 0 && len1 != len2) return len1 - len2;
+    if (cmp != 0) return cmp;
+    
+    return strcmp(n1, n2);
+}
+
 static void compute_sankey_layout(HeatmapState *hm, SankeyNode *left, SankeyNode *right, SankeyLink *links, int *num_links, double max_height) {
     int n = hm->num_tags;
     *num_links = 0;
     
-    // Calculate total flows
+    // 1. Calculate total flows and count active tags
+    double *node_values = g_new0(double, n);
+    int active_count = 0;
+    int active_indices[n];
+    
     for (int i = 0; i < n; i++) {
-        left[i].original_index = i;
-        right[i].original_index = i;
-        left[i].value = 0;
-        right[i].value = 0;
         for (int j = 0; j < n; j++) {
             if (hm->matrix[i][j] > 0) {
-                left[i].value += hm->matrix[i][j];
-                right[j].value += hm->matrix[i][j];
+                node_values[i] += hm->matrix[i][j];
+            }
+        }
+        if (node_values[i] > 0) {
+            active_indices[active_count++] = i;
+        }
+    }
+    
+    // 2. Sort active indices by category to group them
+    g_qsort_with_data(active_indices, active_count, sizeof(int), compare_tags_grouping, hm);
+    
+    // 3. Initialize active nodes only
+    for (int i = 0; i < active_count; i++) {
+        int orig = active_indices[i];
+        left[i].original_index = orig;
+        right[i].original_index = orig;
+        left[i].value = node_values[orig];
+        right[i].value = node_values[orig];
+    }
+    g_free(node_values);
+    
+    // 4. Create links
+    for (int i = 0; i < active_count; i++) {
+        for (int j = 0; j < active_count; j++) {
+            int s_orig = left[i].original_index;
+            int t_orig = right[j].original_index;
+            if (s_orig != t_orig && hm->matrix[s_orig][t_orig] > 0) {
+                // To avoid double counting in symmetric matrix for Sankey ribbons,
+                // we only draw from smaller index to larger, or just one direction.
+                // However, co-occurrence is symmetric. For a bipartite Sankey,
+                // we can just draw all links s -> t where s < t.
+                if (s_orig < t_orig) {
+                    links[*num_links].source = s_orig;
+                    links[*num_links].target = t_orig;
+                    links[*num_links].value = hm->matrix[s_orig][t_orig];
+                    (*num_links)++;
+                }
             }
         }
     }
     
-    // Create links (Full symmetric co-occurrence)
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            if (i != j && hm->matrix[i][j] > 0) {
-                links[*num_links].source = i;
-                links[*num_links].target = j;
-                links[*num_links].value = hm->matrix[i][j];
-                (*num_links)++;
-            }
-        }
-    }
-    
-    // Calculate scale factor ky
-    double total_val = 0;
-    for (int i = 0; i < n; i++) total_val += left[i].value;
-    
+    // 5. Initial Y distribution (compact)
     double node_padding = 15.0;
-    double ky = (max_height - (n - 1) * node_padding) / (total_val + 0.1);
-    if (ky > 15.0) ky = 15.0;
-    if (ky < 1.0) ky = 1.0;
+    double total_val = 0;
+    for (int i = 0; i < active_count; i++) total_val += left[i].value;
     
-    for (int i = 0; i < n; i++) {
-        left[i].dy = fmax(2.0, left[i].value * ky);
-        right[i].dy = fmax(2.0, right[i].value * ky);
-        left[i].y = i * (max_height / (double)n);
-        right[i].y = i * (max_height / (double)n);
+    double ky = (max_height - (active_count - 1) * node_padding) / (total_val + 0.1);
+    ky = fmax(1.0, fmin(ky, 15.0));
+    
+    for (int i = 0; i < active_count; i++) {
+        left[i].dy = fmax(4.0, left[i].value * ky);
+        right[i].dy = fmax(4.0, right[i].value * ky);
+        // Initial y: spread them out but keep them in category order
+        left[i].y = i * (max_height / (double)active_count);
+        right[i].y = i * (max_height / (double)active_count);
     }
     
-    // Relaxation iterations (Barycenter heuristic)
+    // 6. Relaxation iterations (Barycenter heuristic)
     for (int iter = 0; iter < 32; iter++) {
         // Right nodes
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < active_count; i++) {
             double sum_y = 0;
             double sum_v = 0;
             for (int l = 0; l < *num_links; l++) {
                 if (links[l].target == right[i].original_index) {
-                    int s_idx = find_node_by_orig(left, n, links[l].source);
+                    int s_idx = find_node_by_orig(left, active_count, links[l].source);
                     if (s_idx >= 0) {
                         sum_y += (left[s_idx].y + left[s_idx].dy / 2.0) * links[l].value;
                         sum_v += links[l].value;
@@ -646,26 +690,30 @@ static void compute_sankey_layout(HeatmapState *hm, SankeyNode *left, SankeyNode
             }
             if (sum_v > 0) right[i].y = (sum_y / sum_v) - right[i].dy / 2.0;
         }
-        qsort(right, n, sizeof(SankeyNode), compare_nodes_y);
+        qsort(right, active_count, sizeof(SankeyNode), compare_nodes_y);
         
         // Push apart right nodes
         double cy = 0;
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < active_count; i++) {
             if (right[i].y < cy) right[i].y = cy;
             cy = right[i].y + right[i].dy + node_padding;
         }
-        if (cy > max_height + node_padding && n > 1) {
+        // Center the result if it's smaller than max_height
+        if (cy < max_height) {
+            double push = (max_height - cy) / 2.0;
+            for (int i=0; i<active_count; i++) right[i].y += push;
+        } else if (cy > max_height + node_padding && active_count > 1) {
             double ratio = max_height / (cy - node_padding);
-            for(int i=0; i<n; i++) { right[i].y *= ratio; right[i].dy *= ratio; }
+            for(int i=0; i<active_count; i++) { right[i].y *= ratio; right[i].dy *= ratio; }
         }
         
         // Left nodes
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < active_count; i++) {
             double sum_y = 0;
             double sum_v = 0;
             for (int l = 0; l < *num_links; l++) {
                 if (links[l].source == left[i].original_index) {
-                    int t_idx = find_node_by_orig(right, n, links[l].target);
+                    int t_idx = find_node_by_orig(right, active_count, links[l].target);
                     if (t_idx >= 0) {
                         sum_y += (right[t_idx].y + right[t_idx].dy / 2.0) * links[l].value;
                         sum_v += links[l].value;
@@ -674,24 +722,27 @@ static void compute_sankey_layout(HeatmapState *hm, SankeyNode *left, SankeyNode
             }
             if (sum_v > 0) left[i].y = (sum_y / sum_v) - left[i].dy / 2.0;
         }
-        qsort(left, n, sizeof(SankeyNode), compare_nodes_y);
+        qsort(left, active_count, sizeof(SankeyNode), compare_nodes_y);
         
         // Push apart left nodes
         cy = 0;
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < active_count; i++) {
             if (left[i].y < cy) left[i].y = cy;
             cy = left[i].y + left[i].dy + node_padding;
         }
-        if (cy > max_height + node_padding && n > 1) {
+        if (cy < max_height) {
+            double push = (max_height - cy) / 2.0;
+            for (int i=0; i<active_count; i++) left[i].y += push;
+        } else if (cy > max_height + node_padding && active_count > 1) {
             double ratio = max_height / (cy - node_padding);
-            for(int i=0; i<n; i++) { left[i].y *= ratio; left[i].dy *= ratio; }
+            for(int i=0; i<active_count; i++) { left[i].y *= ratio; left[i].dy *= ratio; }
         }
     }
     
-    // Calculate source and target Y offsets (Stacking with sorting)
-    for (int i = 0; i < n; i++) {
+    // 7. Calculate source and target Y offsets (Stacking with sorting)
+    for (int i = 0; i < active_count; i++) {
         int node_links_count = 0;
-        int node_links[n*2]; // increased size just in case
+        int node_links[n*2]; 
         for (int l = 0; l < *num_links; l++) {
             if (links[l].source == left[i].original_index) {
                 node_links[node_links_count++] = l;
@@ -702,8 +753,8 @@ static void compute_sankey_layout(HeatmapState *hm, SankeyNode *left, SankeyNode
             for(int k=m+1; k<node_links_count; k++) {
                 int l1 = node_links[m];
                 int l2 = node_links[k];
-                int t1 = find_node_by_orig(right, n, links[l1].target);
-                int t2 = find_node_by_orig(right, n, links[l2].target);
+                int t1 = find_node_by_orig(right, active_count, links[l1].target);
+                int t2 = find_node_by_orig(right, active_count, links[l2].target);
                 if (right[t1].y > right[t2].y) {
                     int tmp = node_links[m];
                     node_links[m] = node_links[k];
@@ -720,7 +771,7 @@ static void compute_sankey_layout(HeatmapState *hm, SankeyNode *left, SankeyNode
         }
     }
     
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < active_count; i++) {
         int node_links_count = 0;
         int node_links[n*2];
         for (int l = 0; l < *num_links; l++) {
@@ -733,8 +784,8 @@ static void compute_sankey_layout(HeatmapState *hm, SankeyNode *left, SankeyNode
             for(int k=m+1; k<node_links_count; k++) {
                 int l1 = node_links[m];
                 int l2 = node_links[k];
-                int s1 = find_node_by_orig(left, n, links[l1].source);
-                int s2 = find_node_by_orig(left, n, links[l2].source);
+                int s1 = find_node_by_orig(left, active_count, links[l1].source);
+                int s2 = find_node_by_orig(left, active_count, links[l2].source);
                 if (left[s1].y > left[s2].y) {
                     int tmp = node_links[m];
                     node_links[m] = node_links[k];
@@ -801,13 +852,21 @@ static void draw_heatmap(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     SankeyLink *links = g_new0(SankeyLink, n * n);
     int num_links = 0;
     
-    double max_h = fmax(600.0, n * 30.0);
+    // Find active count
+    int active_count = 0;
+    for (int i = 0; i < n; i++) {
+        double val = 0;
+        for (int j = 0; j < n; j++) val += hm->matrix[i][j];
+        if (val > 0) active_count++;
+    }
+    
+    double max_h = fmax(600.0, active_count * 35.0);
     compute_sankey_layout(hm, left, right, links, &num_links, max_h);
     
     // Draw Links (Ribbons)
     for (int l = 0; l < num_links; l++) {
-        int s = find_node_by_orig(left, n, links[l].source);
-        int t = find_node_by_orig(right, n, links[l].target);
+        int s = find_node_by_orig(left, active_count, links[l].source);
+        int t = find_node_by_orig(right, active_count, links[l].target);
         if (s == -1 || t == -1) continue;
         if (left[s].value <= 0) continue; // Safety
         
@@ -847,9 +906,8 @@ static void draw_heatmap(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     gtk_style_context_lookup_color(gtk_widget_get_style_context(GTK_WIDGET(area)), "theme_fg_color", &fg_color);
     
     // Draw Left Nodes
-    for(int i = 0; i < n; i++) {
+    for(int i = 0; i < active_count; i++) {
         int orig = left[i].original_index;
-        if (left[i].value == 0) continue;
         
         double r, g, b;
         get_category_color(hm->tag_names[orig], &r, &g, &b);
@@ -883,9 +941,8 @@ static void draw_heatmap(GtkDrawingArea *area, cairo_t *cr, int width, int heigh
     }
     
     // Draw Right Nodes
-    for(int i = 0; i < n; i++) {
+    for(int i = 0; i < active_count; i++) {
         int orig = right[i].original_index;
-        if (right[i].value == 0) continue;
         
         double r, g, b;
         get_category_color(hm->tag_names[orig], &r, &g, &b);
