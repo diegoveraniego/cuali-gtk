@@ -1313,7 +1313,7 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     // 4. Wordcloud
     GtkWidget *wc_view = create_wordcloud_view(state);
     AdwViewStackPage *p4 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), wc_view, "wordcloud", "Frequencies");
-    adw_view_stack_page_set_icon_name(p4, "draw-text-symbolic");
+    adw_view_stack_page_set_icon_name(p4, "large-text-symbolic");
     
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), viz_stack);
     
