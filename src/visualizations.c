@@ -1120,6 +1120,19 @@ static gboolean wc_is_pure_digit(const char *s) {
     return TRUE;
 }
 
+static gboolean is_only_nbsp(const char *s) {
+    if (!s || *s == '\0') return TRUE;
+    const char *p = s;
+    while (*p) {
+        if ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xA0) {
+            p += 2;
+        } else {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
 static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     // Keep existing participant_names if already set, else load from file
     if (!wc->participant_names) {
@@ -1148,8 +1161,8 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
         }
     }
 
-    GRegex *timestamp_rx = g_regex_new("^\\s*\\[[\\d:]+\\]\\s*$", G_REGEX_DEFAULT, 0, NULL);
-    GRegex *speaker_rx = g_regex_new("^\\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\\s*)+\\d*\\s*:\\s*$", G_REGEX_DEFAULT, 0, NULL);
+    GRegex *timestamp_rx = g_regex_new("^\\[[\\d:]+\\]$", G_REGEX_DEFAULT, 0, NULL);
+    GRegex *speaker_prefix_rx = g_regex_new("^([A-ZÁÉÍÓÚÑÜ][a-záéíóúñü]+)(\\s+\\d+)?\\s*:\\s*", G_REGEX_DEFAULT, 0, NULL);
 
     GHashTable *counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     sqlite3_stmt *stmt = db_documents_get_all_contents(app_state->current_project_id);
@@ -1160,47 +1173,57 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
 
             char *text = strip_html(html);
 
-            // Three-pass approach:
-            // (1) skip timestamp lines,
-            // (2) skip speaker-label lines / strip speaker-label prefix,
-            // (3) post-tokenization pseudonym+number filter.
             char **lines = g_strsplit(text, "\n", -1);
             for (int li = 0; lines[li] != NULL; li++) {
                 const char *line = lines[li];
-                const char *p = line;
-                while (*p == ' ' || *p == '\t') p++;
+                char *trimmed = g_strdup(line);
+                g_strstrip(trimmed);
 
-                // Pass 1: Skip timestamp lines
-                if (timestamp_rx && g_regex_match(timestamp_rx, line, 0, NULL)) continue;
-
-                // Pass 2: Skip speaker-label lines
-                if (speaker_rx && g_regex_match(speaker_rx, line, 0, NULL)) continue;
-
-                // Strip speaker-label prefix if it starts the dialogue line
-                const char *content_start = p;
-                if (wc->num_participants > 0) {
-                    for (int ni = 0; wc->participant_names[ni] != NULL; ni++) {
-                        char *name = g_strstrip(wc->participant_names[ni]);
-                        if (name[0] == '\0') continue;
-                        gsize nlen = strlen(name);
-                        if (g_ascii_strncasecmp(p, name, nlen) == 0) {
-                            const char *after = p + nlen;
-                            while (*after == ' ' || *after == '\t') after++;
-                            while (*after >= '0' && *after <= '9') after++;
-                            while (*after == ' ' || *after == '\t') after++;
-                            if (*after == ':') {
-                                content_start = after + 1;
-                                while (*content_start == ' ' || *content_start == '\t') content_start++;
-                            }
-                            break;
-                        }
-                    }
+                /*
+                 * Three-pass Google Pinpoint transcript filtering pipeline:
+                 *
+                 * Pass 1: Skip standalone timestamp lines (e.g. "[MM:SS]", "[HH:MM:SS]")
+                 *         and separator lines consisting entirely of non-breaking spaces (U+00A0).
+                 */
+                if (trimmed[0] == '\0' || is_only_nbsp(trimmed)) {
+                    g_free(trimmed);
+                    continue;
                 }
 
-                if (*content_start == '\0') continue;
+                if (timestamp_rx && g_regex_match(timestamp_rx, trimmed, 0, NULL)) {
+                    g_free(trimmed);
+                    continue;
+                }
 
-                // Pass 3: Post-tokenization lookahead filter
-                char *lower = g_utf8_strdown(content_start, -1);
+                /*
+                 * Pass 2: Strip same-line speaker label prefixes (e.g. "Estudiante 1: ", "Entrevistador: ")
+                 *         using a regex prefix match at the start of dialogue lines.
+                 */
+                const char *dialog = trimmed;
+                GMatchInfo *match_info = NULL;
+                if (speaker_prefix_rx && g_regex_match(speaker_prefix_rx, trimmed, 0, &match_info)) {
+                    int start_pos = 0, end_pos = 0;
+                    if (g_match_info_fetch_pos(match_info, 0, &start_pos, &end_pos)) {
+                        dialog = trimmed + end_pos;
+                    }
+                    g_match_info_free(match_info);
+                }
+
+                // If dialogue is empty, or only has whitespace/NBSP, skip it
+                char *dialog_trimmed = g_strdup(dialog);
+                g_strstrip(dialog_trimmed);
+                if (dialog_trimmed[0] == '\0' || is_only_nbsp(dialog_trimmed)) {
+                    g_free(dialog_trimmed);
+                    g_free(trimmed);
+                    continue;
+                }
+
+                /*
+                 * Pass 3: Post-tokenization lookahead filter. Look for pseudonym+number
+                 *         combinations (e.g., "estudiante 1", "estudiante 12") matching
+                 *         a participant name and a number sequence, and skip both.
+                 */
+                char *lower = g_utf8_strdown(dialog_trimmed, -1);
                 char **words_raw = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>[]{}—–", -1);
 
                 // Build clean list of non-empty tokens
@@ -1244,6 +1267,8 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                     }
                 }
                 g_ptr_array_free(clean_tokens, TRUE);
+                g_free(dialog_trimmed);
+                g_free(trimmed);
             }
             g_strfreev(lines);
             g_free(text);
@@ -1264,7 +1289,7 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
         wc->max_freq = ((WordFreq*)wc->words->data)->freq;
     }
     if (timestamp_rx) g_regex_unref(timestamp_rx);
-    if (speaker_rx) g_regex_unref(speaker_rx);
+    if (speaker_prefix_rx) g_regex_unref(speaker_prefix_rx);
     if (stopword_set) g_hash_table_destroy(stopword_set);
     g_free(stopwords_language);
     g_free(stopwords_extra);

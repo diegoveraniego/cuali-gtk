@@ -9,7 +9,7 @@ ifeq ($(HAVE_XLSXWRITER),yes)
 endif
 
 # GUI target
-SRC = src/main.c src/database.c src/importer.c src/window.c src/resources.c src/exporter.c
+SRC = src/main.c src/database.c src/importer.c src/window.c src/resources.c src/exporter.c src/visualizations.c
 OBJ = $(SRC:.c=.o)
 TARGET = cuali-gtk
 

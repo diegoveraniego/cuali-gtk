@@ -103,3 +103,116 @@ export_codebook_csv (int project_id, const char *path)
     fclose (f);
     return true;
 }
+
+
+typedef struct {
+    char *theme_name;
+    GString *codes;
+    int frequency;
+    char *description;
+} ThematicRow;
+
+static void thematic_row_free (ThematicRow *row) {
+    if (!row) return;
+    g_free(row->theme_name);
+    if (row->codes) g_string_free(row->codes, TRUE);
+    g_free(row->description);
+    g_free(row);
+}
+
+bool
+export_thematic_table_html (int project_id, const char *path)
+{
+    FILE *f = fopen (path, "w");
+    if (!f) return false;
+
+    fprintf(f, "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body>\n");
+    fprintf(f, "<table border=\"1\" style=\"border-collapse: collapse; width: 100%%; font-family: sans-serif;\">\n");
+    fprintf(f, "<thead><tr><th>Tema Principal</th><th>Códigos Emergentes</th><th>Frecuencia (Únicas)</th><th>Descripción Analítica</th></tr></thead>\n");
+    fprintf(f, "<tbody>\n");
+
+    GHashTable *themes = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) thematic_row_free);
+    GPtrArray *ordered_themes = g_ptr_array_new ();
+
+    // First get the codes and descriptions
+    sqlite3_stmt *stmt = db_tags_get_stats (project_id);
+    if (stmt) {
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            const char *path_str = (const char *)sqlite3_column_text (stmt, 1);
+            const char *desc     = (const char *)sqlite3_column_text (stmt, 4);
+
+            if (!path_str) continue;
+
+            char **parts = g_strsplit (path_str, "/", 2);
+            char *parent = parts[0];
+            char *child = parts[1];
+
+            if (!parent) {
+                g_strfreev(parts);
+                continue;
+            }
+
+            ThematicRow *row = g_hash_table_lookup(themes, parent);
+            if (!row) {
+                row = g_new0(ThematicRow, 1);
+                row->theme_name = g_strdup(parent);
+                row->codes = g_string_new("");
+                row->frequency = 0;
+                row->description = g_strdup("");
+                g_hash_table_insert(themes, g_strdup(parent), row);
+                g_ptr_array_add(ordered_themes, row);
+            }
+
+            if (child && strlen(child) > 0) {
+                if (row->codes->len > 0) {
+                    g_string_append(row->codes, ", ");
+                }
+                g_string_append(row->codes, child);
+            }
+
+            if (desc && strlen(desc) > 0) {
+                if (strlen(row->description) > 0) {
+                    char *old = row->description;
+                    row->description = g_strdup_printf("%s | %s", old, desc);
+                    g_free(old);
+                } else {
+                    g_free(row->description);
+                    row->description = g_strdup(desc);
+                }
+            }
+            g_strfreev(parts);
+        }
+        sqlite3_finalize (stmt);
+    }
+
+    // Now query the true unique frequency for each theme
+    sqlite3_stmt *stmt_freq = db_get_theme_unique_frequencies(project_id);
+    if (stmt_freq) {
+        while (sqlite3_step(stmt_freq) == SQLITE_ROW) {
+            const char *tema = (const char *)sqlite3_column_text(stmt_freq, 0);
+            int freq = sqlite3_column_int(stmt_freq, 1);
+            if (tema) {
+                ThematicRow *row = g_hash_table_lookup(themes, tema);
+                if (row) {
+                    row->frequency = freq;
+                }
+            }
+        }
+        sqlite3_finalize(stmt_freq);
+    }
+
+    for (guint i = 0; i < ordered_themes->len; i++) {
+        ThematicRow *row = g_ptr_array_index(ordered_themes, i);
+        fprintf(f, "<tr><td style=\"padding: 8px;\">%s</td><td style=\"padding: 8px;\">%s</td><td style=\"padding: 8px; text-align: center;\">%d</td><td style=\"padding: 8px;\">%s</td></tr>\n", 
+                row->theme_name ? row->theme_name : "", 
+                row->codes ? row->codes->str : "", 
+                row->frequency, 
+                row->description ? row->description : "");
+    }
+    fprintf(f, "</tbody></table></body></html>\n");
+
+    g_ptr_array_free(ordered_themes, TRUE);
+    g_hash_table_destroy(themes);
+    fclose (f);
+    return true;
+}

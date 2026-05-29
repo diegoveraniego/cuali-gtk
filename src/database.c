@@ -780,3 +780,39 @@ sqlite3_stmt* db_highlight_colors_for_document(int document_id) {
     sqlite3_bind_int(stmt, 1, document_id);
     return stmt;
 }
+
+
+sqlite3_stmt* db_get_theme_unique_frequencies(int project_id) {
+    sqlite3_stmt *stmt;
+    const char *sql = 
+        "SELECT substr(t.path, 1, instr(t.path, '/') - 1) as tema, COUNT(DISTINCT ht.highlight_id) as freq "
+        "FROM tags t "
+        "JOIN highlight_tags ht ON t.id = ht.tag_id "
+        "WHERE t.project_id = ? AND instr(t.path, '/') > 0 "
+        "GROUP BY tema;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
+    sqlite3_bind_int(stmt, 1, project_id);
+    return stmt;
+}
+
+sqlite3_stmt* db_tags_get_matrix(int project_id) {
+    sqlite3_stmt *stmt;
+    const char *sql = 
+        "SELECT h.document_id, ht.tag_id, COUNT(DISTINCT h.id) as freq "
+        "FROM highlights h "
+        "JOIN highlight_tags ht ON h.id = ht.highlight_id "
+        "JOIN documents d ON h.document_id = d.id "
+        "WHERE d.project_id = ? "
+        "GROUP BY h.document_id, ht.tag_id;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
+    sqlite3_bind_int(stmt, 1, project_id);
+    return stmt;
+}
+
+sqlite3_stmt* db_documents_get_all_contents(int project_id) {
+    sqlite3_stmt *stmt;
+    const char *sql = "SELECT contents FROM documents WHERE project_id = ?;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return NULL;
+    sqlite3_bind_int(stmt, 1, project_id);
+    return stmt;
+}

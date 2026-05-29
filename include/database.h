@@ -28,6 +28,7 @@ bool db_tag_delete(int tag_id);
 sqlite3_stmt* db_tags_get_all(int project_id);
 sqlite3_stmt* db_tags_get_for_highlight(int highlight_id);
 sqlite3_stmt* db_tags_get_stats(int project_id);
+sqlite3_stmt* db_get_theme_unique_frequencies(int project_id);
 int db_tag_get_count(int tag_id);
 
 int db_highlight_add(int document_id, int start, int end, const char *snippet);
@@ -47,6 +48,8 @@ sqlite3_stmt* db_highlight_colors_for_document(int document_id);
 
 sqlite3_stmt* db_results_get_all(int project_id);
 sqlite3_stmt* db_tags_get_cooccurrence(int project_id);
+sqlite3_stmt* db_tags_get_matrix(int project_id);
+sqlite3_stmt* db_documents_get_all_contents(int project_id);
 
 bool db_is_open(void);
 
