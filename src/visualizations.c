@@ -149,6 +149,7 @@ typedef struct {
     double x, y;
     double vx, vy;
     double radius;
+    int degree;
 } GraphNode;
 
 typedef struct {
@@ -164,6 +165,12 @@ typedef struct {
     double pan_x, pan_y;
     GraphNode *drag_node;
     int width, height;
+    double drag_start_pan_x;
+    double drag_start_pan_y;
+    GraphNode *hover_node;
+    GraphEdge *hover_edge;
+    double mouse_x;
+    double mouse_y;
 } WhiteboardState;
 
 static GtkWidget *g_wb_area = NULL;
@@ -267,78 +274,208 @@ static void rounded_rect(cairo_t *cr, double x, double y, double w, double h, do
     cairo_close_path(cr);
 }
 
-static void draw_whiteboard(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    WhiteboardState *state = (WhiteboardState *)user_data;
-    state->width = width;
-    state->height = height;
+static double distance_to_segment(double px, double py, double ax, double ay, double bx, double by) {
+    double ab_x = bx - ax;
+    double ab_y = by - ay;
+    double ap_x = px - ax;
+    double ap_y = py - ay;
     
-    // Background is transparent to respect Adwaita theme
-    cairo_translate(cr, state->pan_x, state->pan_y);
-    cairo_scale(cr, state->zoom, state->zoom);
+    double ab_len_sq = ab_x * ab_x + ab_y * ab_y;
+    if (ab_len_sq < 1e-9) {
+        return sqrt(ap_x * ap_x + ap_y * ap_y);
+    }
     
-    // Draw edges
-    cairo_set_source_rgba(cr, 0.5, 0.5, 0.5, 0.4);
+    double t = (ap_x * ab_x + ap_y * ab_y) / ab_len_sq;
+    t = fmax(0.0, fmin(1.0, t));
+    
+    double proj_x = ax + t * ab_x;
+    double proj_y = ay + t * ab_y;
+    
+    double dx = px - proj_x;
+    double dy = py - proj_y;
+    return sqrt(dx * dx + dy * dy);
+}
+
+static GraphEdge* find_edge_at(WhiteboardState *state, double px, double py) {
+    GraphEdge *best_edge = NULL;
+    double min_dist = 5.0; // 5 pixels tolerance in logical space
     for (GList *l = state->edges; l != NULL; l = l->next) {
         GraphEdge *edge = l->data;
         GraphNode *n1 = find_node(state, edge->source_id);
         GraphNode *n2 = find_node(state, edge->target_id);
         if (n1 && n2) {
-            cairo_set_line_width(cr, fmax(1.5, log(edge->weight + 1) * 2));
+            double dist = distance_to_segment(px, py, n1->x, n1->y, n2->x, n2->y);
+            if (dist < min_dist) {
+                min_dist = dist;
+                best_edge = edge;
+            }
+        }
+    }
+    return best_edge;
+}
+
+static void draw_whiteboard(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    WhiteboardState *state = (WhiteboardState *)user_data;
+    state->width = width;
+    state->height = height;
+    
+    // Background is #1a1a1a
+    cairo_set_source_rgb(cr, 0.102, 0.102, 0.102);
+    cairo_paint(cr);
+    
+    cairo_save(cr);
+    cairo_translate(cr, state->pan_x, state->pan_y);
+    cairo_scale(cr, state->zoom, state->zoom);
+    
+    // Find max edge weight for normalization
+    int max_weight = 1;
+    for (GList *l = state->edges; l != NULL; l = l->next) {
+        GraphEdge *edge = l->data;
+        if (edge->weight > max_weight) {
+            max_weight = edge->weight;
+        }
+    }
+    
+    // Draw edges as straight lines with weight-based thickness and opacity
+    for (GList *l = state->edges; l != NULL; l = l->next) {
+        GraphEdge *edge = l->data;
+        GraphNode *n1 = find_node(state, edge->source_id);
+        GraphNode *n2 = find_node(state, edge->target_id);
+        if (n1 && n2) {
+            double ratio = (double)edge->weight / max_weight;
+            double line_w = 1.0 + 4.0 * ratio;
+            double opacity = 0.15 + 0.35 * ratio;
+            
+            if (state->hover_edge == edge) {
+                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.8);
+                cairo_set_line_width(cr, line_w + 1.0);
+            } else {
+                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, opacity);
+                cairo_set_line_width(cr, line_w);
+            }
             cairo_move_to(cr, n1->x, n1->y);
-            double dx = (n2->x - n1->x) / 2.0;
-            cairo_curve_to(cr, n1->x + dx, n1->y, n2->x - dx, n2->y, n2->x, n2->y);
+            cairo_line_to(cr, n2->x, n2->y);
             cairo_stroke(cr);
         }
     }
     
-    // Draw Nodes
+    // Draw Nodes as filled circles with white borders
     for (GList *l = state->nodes; l != NULL; l = l->next) {
         GraphNode *n = l->data;
         
+        GdkRGBA rgba;
+        gdk_rgba_parse(&rgba, n->color ? n->color : "#7F77DD");
+        cairo_set_source_rgba(cr, rgba.red, rgba.green, rgba.blue, 1.0);
+        cairo_arc(cr, n->x, n->y, n->radius, 0, 2.0 * G_PI);
+        cairo_fill_preserve(cr);
+        
+        if (state->hover_node == n) {
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
+            cairo_set_line_width(cr, 2.5);
+        } else {
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.8);
+            cairo_set_line_width(cr, 1.5);
+        }
+        cairo_stroke(cr);
+        
+        // Draw tag path label next to node in white, 11px, truncated at 20 characters
+        char *truncated_name = NULL;
+        if (n->name) {
+            if (g_utf8_strlen(n->name, -1) > 20) {
+                gchar *sub = g_utf8_substring(n->name, 0, 17);
+                truncated_name = g_strconcat(sub, "...", NULL);
+                g_free(sub);
+            } else {
+                truncated_name = g_strdup(n->name);
+            }
+        } else {
+            truncated_name = g_strdup("");
+        }
+        
         PangoLayout *layout = pango_cairo_create_layout(cr);
-        pango_layout_set_text(layout, n->name, -1);
-        PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell Bold 11");
+        pango_layout_set_text(layout, truncated_name, -1);
+        PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 11");
         pango_layout_set_font_description(layout, desc);
         pango_font_description_free(desc);
         
         int text_w, text_h;
         pango_layout_get_pixel_size(layout, &text_w, &text_h);
         
-        double node_w = text_w + 32; // padding + icon space
-        double node_h = 32;
-        double nx = n->x - node_w/2.0;
-        double ny = n->y - node_h/2.0;
-        
-        // Node shadow
-        cairo_set_source_rgba(cr, 0, 0, 0, 0.15);
-        rounded_rect(cr, nx + 2, ny + 2, node_w, node_h, 8.0);
-        cairo_fill(cr);
-        
-        // Node background
-        GdkRGBA rgba;
-        gdk_rgba_parse(&rgba, n->color ? n->color : "#3584e4");
-        cairo_set_source_rgba(cr, rgba.red, rgba.green, rgba.blue, 1.0);
-        rounded_rect(cr, nx, ny, node_w, node_h, 8.0);
-        cairo_fill_preserve(cr);
-        
-        cairo_set_source_rgba(cr, 1, 1, 1, 0.2);
-        cairo_set_line_width(cr, 1);
-        cairo_stroke(cr);
-        
-        // Icon (Diamond / Tag symbol)
-        cairo_set_source_rgb(cr, 1, 1, 1); // White text inside colored pill
-        cairo_move_to(cr, nx + 8, ny + 12);
-        cairo_line_to(cr, nx + 14, ny + 18);
-        cairo_line_to(cr, nx + 20, ny + 12);
-        cairo_stroke(cr);
-        
-        // Text
-        cairo_move_to(cr, nx + 24, ny + (node_h - text_h)/2.0);
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_move_to(cr, n->x + n->radius + 6.0, n->y - (text_h / 2.0));
         pango_cairo_show_layout(cr, layout);
-        g_object_unref(layout);
         
-        // Set radius for dragging calculations
-        n->radius = fmax(node_w, node_h)/2.0;
+        g_object_unref(layout);
+        g_free(truncated_name);
+    }
+    
+    cairo_restore(cr);
+    
+    // Draw tooltips in physical coordinates if not exporting to SVG
+    if (cairo_surface_get_type(cairo_get_target(cr)) != CAIRO_SURFACE_TYPE_SVG) {
+        if (state->hover_node || state->hover_edge) {
+            char *text = NULL;
+            if (state->hover_node) {
+                text = g_strdup_printf("Tag: %s\nHighlights: %d", state->hover_node->name, state->hover_node->degree);
+            } else if (state->hover_edge) {
+                GraphNode *n1 = find_node(state, state->hover_edge->source_id);
+                GraphNode *n2 = find_node(state, state->hover_edge->target_id);
+                if (n1 && n2) {
+                    text = g_strdup_printf("Connection:\n%s ↔ %s\nCo-occurrences: %d", n1->name, n2->name, state->hover_edge->weight);
+                }
+            }
+            
+            if (text) {
+                PangoLayout *layout = pango_cairo_create_layout(cr);
+                pango_layout_set_text(layout, text, -1);
+                PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 11");
+                pango_layout_set_font_description(layout, desc);
+                pango_font_description_free(desc);
+                
+                int text_w, text_h;
+                pango_layout_get_pixel_size(layout, &text_w, &text_h);
+                
+                double padding_x = 10.0;
+                double padding_y = 8.0;
+                double box_w = text_w + padding_x * 2.0;
+                double box_h = text_h + padding_y * 2.0;
+                
+                double tx = state->mouse_x + 15.0;
+                double ty = state->mouse_y + 15.0;
+                
+                if (tx + box_w > width) {
+                    tx = state->mouse_x - box_w - 5.0;
+                }
+                if (ty + box_h > height) {
+                    ty = state->mouse_y - box_h - 5.0;
+                }
+                if (tx < 0.0) tx = 5.0;
+                if (ty < 0.0) ty = 5.0;
+                
+                // Draw tooltip shadow
+                cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.3);
+                rounded_rect(cr, tx + 2, ty + 2, box_w, box_h, 6.0);
+                cairo_fill(cr);
+                
+                // Draw tooltip box background
+                cairo_set_source_rgba(cr, 0.15, 0.15, 0.15, 0.95);
+                rounded_rect(cr, tx, ty, box_w, box_h, 6.0);
+                cairo_fill_preserve(cr);
+                
+                // Draw border
+                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.2);
+                cairo_set_line_width(cr, 1.0);
+                cairo_stroke(cr);
+                
+                // Draw tooltip text
+                cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+                cairo_move_to(cr, tx + padding_x, ty + padding_y);
+                pango_cairo_show_layout(cr, layout);
+                
+                g_object_unref(layout);
+                g_free(text);
+            }
+        }
     }
 }
 
@@ -347,6 +484,10 @@ static void on_wb_drag_begin(GtkGestureDrag *gesture, double x, double y, gpoint
     double logical_x = (x - state->pan_x) / state->zoom;
     double logical_y = (y - state->pan_y) / state->zoom;
     state->drag_node = find_node_at(state, logical_x, logical_y);
+    if (!state->drag_node) {
+        state->drag_start_pan_x = state->pan_x;
+        state->drag_start_pan_y = state->pan_y;
+    }
 }
 
 static void on_wb_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data) {
@@ -357,8 +498,22 @@ static void on_wb_drag_update(GtkGestureDrag *gesture, double offset_x, double o
     if (state->drag_node) {
         state->drag_node->x = (start_x + offset_x - state->pan_x) / state->zoom;
         state->drag_node->y = (start_y + offset_y - state->pan_y) / state->zoom;
+        state->drag_node->vx = 0.0;
+        state->drag_node->vy = 0.0;
+        
+        // Pinned node won't move; let other nodes respond to it
+        for (int i = 0; i < 5; i++) {
+            double dx = state->drag_node->x;
+            double dy = state->drag_node->y;
+            apply_force_directed(state);
+            state->drag_node->x = dx;
+            state->drag_node->y = dy;
+            state->drag_node->vx = 0.0;
+            state->drag_node->vy = 0.0;
+        }
     } else {
-        // Panning not fully implemented in this minimal drag for simplicity
+        state->pan_x = state->drag_start_pan_x + offset_x;
+        state->pan_y = state->drag_start_pan_y + offset_y;
     }
     gtk_widget_queue_draw(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture)));
 }
@@ -378,6 +533,39 @@ static gboolean on_wb_scroll(GtkEventControllerScroll *scroll, double dx, double
     return TRUE;
 }
 
+static void on_wb_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data) {
+    WhiteboardState *state = (WhiteboardState *)user_data;
+    state->mouse_x = x;
+    state->mouse_y = y;
+    
+    double logical_x = (x - state->pan_x) / state->zoom;
+    double logical_y = (y - state->pan_y) / state->zoom;
+    
+    GraphNode *new_hover_node = find_node_at(state, logical_x, logical_y);
+    GraphEdge *new_hover_edge = NULL;
+    
+    if (!new_hover_node) {
+        new_hover_edge = find_edge_at(state, logical_x, logical_y);
+    }
+    
+    if (state->hover_node != new_hover_node || state->hover_edge != new_hover_edge) {
+        state->hover_node = new_hover_node;
+        state->hover_edge = new_hover_edge;
+        gtk_widget_queue_draw(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(controller)));
+    } else if (state->hover_node || state->hover_edge) {
+        gtk_widget_queue_draw(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(controller)));
+    }
+}
+
+static void on_wb_leave(GtkEventControllerMotion *controller, gpointer user_data) {
+    WhiteboardState *state = (WhiteboardState *)user_data;
+    if (state->hover_node != NULL || state->hover_edge != NULL) {
+        state->hover_node = NULL;
+        state->hover_edge = NULL;
+        gtk_widget_queue_draw(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(controller)));
+    }
+}
+
 static void load_whiteboard_data(CualiAppState *app_state, WhiteboardState *wb) {
     wb->nodes = NULL;
     wb->edges = NULL;
@@ -385,24 +573,59 @@ static void load_whiteboard_data(CualiAppState *app_state, WhiteboardState *wb) 
     wb->pan_x = 0.0;
     wb->pan_y = 0.0;
     wb->drag_node = NULL;
+    wb->hover_node = NULL;
+    wb->hover_edge = NULL;
+    wb->mouse_x = 0.0;
+    wb->mouse_y = 0.0;
     
-    sqlite3_stmt *stmt = db_tags_get_all(app_state->current_project_id);
+    // Stable random seed based on project_id
+    srand(app_state->current_project_id);
+    
+    sqlite3_stmt *stmt = db_tags_get_stats(app_state->current_project_id);
     if (stmt) {
-        int idx = 0;
         while(sqlite3_step(stmt) == SQLITE_ROW) {
             GraphNode *n = g_new0(GraphNode, 1);
             n->id = sqlite3_column_int(stmt, 0);
             n->name = g_strdup((const char *)sqlite3_column_text(stmt, 1));
             n->color = g_strdup((const char *)sqlite3_column_text(stmt, 2));
-            n->radius = 20.0;
-            // Random start around center
-            n->x = 400 + (rand() % 400 - 200);
-            n->y = 300 + (rand() % 400 - 200);
-            n->vx = 0; n->vy = 0;
+            n->degree = sqlite3_column_int(stmt, 3);
+            
+            // Random start coordinates within canvas boundaries (800x600 canvas)
+            n->x = 100.0 + (rand() % 600);
+            n->y = 100.0 + (rand() % 400);
+            n->vx = 0.0;
+            n->vy = 0.0;
             wb->nodes = g_list_append(wb->nodes, n);
-            idx++;
         }
         sqlite3_finalize(stmt);
+    }
+    
+    // Assign radius proportional to degree (min 6px, max 20px)
+    int max_degree = 0;
+    for (GList *l = wb->nodes; l != NULL; l = l->next) {
+        GraphNode *n = l->data;
+        if (n->degree > max_degree) {
+            max_degree = n->degree;
+        }
+    }
+    for (GList *l = wb->nodes; l != NULL; l = l->next) {
+        GraphNode *n = l->data;
+        if (max_degree > 0) {
+            n->radius = 6.0 + 14.0 * ((double)n->degree / max_degree);
+        } else {
+            n->radius = 6.0;
+        }
+    }
+    
+    // Assign custom palette colors based on node index
+    const char *palette[] = {"#7F77DD", "#1D9E75", "#D85A30", "#378ADD", "#BA7517", "#D4537E"};
+    int palette_size = G_N_ELEMENTS(palette);
+    int node_idx = 0;
+    for (GList *l = wb->nodes; l != NULL; l = l->next) {
+        GraphNode *n = l->data;
+        g_free(n->color);
+        n->color = g_strdup(palette[node_idx % palette_size]);
+        node_idx++;
     }
     
     sqlite3_stmt *estmt = db_tags_get_cooccurrence(app_state->current_project_id);
@@ -457,6 +680,14 @@ GtkWidget* create_whiteboard_view(CualiAppState *state) {
     GtkEventController *scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
     g_signal_connect(scroll, "scroll", G_CALLBACK(on_wb_scroll), wb);
     gtk_widget_add_controller(area, scroll);
+    
+    GtkEventController *motion = gtk_event_controller_motion_new();
+    g_signal_connect(motion, "motion", G_CALLBACK(on_wb_motion), wb);
+    g_signal_connect(motion, "leave", G_CALLBACK(on_wb_leave), wb);
+    gtk_widget_add_controller(area, motion);
+    
+    g_wb_area = area;
+    g_wb_state = wb;
     
     return area;
 }
