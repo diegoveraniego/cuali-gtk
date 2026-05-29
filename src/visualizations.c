@@ -1053,6 +1053,10 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
 
             char *text = strip_html(html);
 
+            // TODO: This parsing logic is tailored specifically for the Google Pinpoint transcription
+            // format (e.g., "Speaker: text" or "Speaker N: text"). In the future, we should implement
+            // a more robust/generic solution, such as supporting standard transcript formats (WebVTT, SRT, JSON)
+            // or allowing customizable regex/delimiters for speaker labels.
             // Process line by line.
             // If a line starts with a participant name (optionally followed by a number
             // and a colon), skip that name token and count only the dialog content.
@@ -1092,19 +1096,20 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                     char *w = g_strstrip(words[i]);
                     if(strlen(w) > 1) {
                         // Skip "Name N" patterns anywhere in dialog
-                        // (e.g. "como dijo Estudiante 2 ayer")
+                        // e.g. "como dijo Estudiante 2 ayer" → skip "estudiante" AND "2"
+                        // But "Un estudiante hizo esto" → counts normally (no number follows)
+                        gboolean skip = FALSE;
                         if (words[i+1] != NULL) {
                             char *next = g_strstrip(words[i+1]);
-                            // next is all digits?
                             gboolean next_is_num = (strlen(next) > 0);
                             for (const char *c = next; *c && next_is_num; c++)
                                 if (*c < '0' || *c > '9') next_is_num = FALSE;
                             if (next_is_num && wc_is_participant_name(wc, w)) {
                                 i++; // skip the number token too
-                                continue;
+                                skip = TRUE;
                             }
                         }
-                        if (!wc_is_participant_name(wc, w)) {
+                        if (!skip) {
                             gpointer val = g_hash_table_lookup(counts, w);
                             int cnt = val ? GPOINTER_TO_INT(val) : 0;
                             g_hash_table_replace(counts, g_strdup(w), GINT_TO_POINTER(cnt + 1));
