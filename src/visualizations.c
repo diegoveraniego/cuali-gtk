@@ -989,52 +989,56 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     wc->words = NULL;
     wc->max_freq = 1;
     wc->zoom = 1.0;
-    
+
+    // Regex to strip "Word Number" patterns anywhere in text (e.g. "Estudiante 2", "Entrevistador 12")
+    // These are participant pseudonyms and should not be counted as meaningful words.
+    GRegex *participant_re = g_regex_new(
+        "[A-Z\\xc0-\\xd6\\xd8-\\xde][a-z\\xe0-\\xf6\\xf8-\\xff]+(\\s+\\d+)",
+        G_REGEX_OPTIMIZE, 0, NULL);
+
     GHashTable *counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     sqlite3_stmt *stmt = db_documents_get_all_contents(app_state->current_project_id);
     if(stmt) {
         while(sqlite3_step(stmt) == SQLITE_ROW) {
             const char *html = (const char*)sqlite3_column_text(stmt, 0);
             if(!html) continue;
-            
+
             char *text = strip_html(html);
-            
+
             // Process line by line, stripping speaker labels at line start.
             // Speaker labels match: "Word:" or "Word N:" (e.g. "Entrevistador:", "Estudiante 3:")
-            // They are identified by the pattern: word(s) at the very start of the line
-            // followed optionally by a space+number, then a colon.
             char **lines = g_strsplit(text, "\n", -1);
             for (int li = 0; lines[li] != NULL; li++) {
                 const char *line = lines[li];
-                // Check if line starts with a speaker label: match /^[A-Za-zÁÉÍÓÚáéíóúÑñ]+(\s+\d+)?:/
+                // Check if line starts with a speaker label: match /^[Letters]+(\s+\d+)?:/
                 const char *p = line;
-                // Skip leading whitespace
                 while (*p == ' ' || *p == '\t') p++;
-                const char *word_start = p;
-                // Consume letters (including accented)
                 while (*p && (g_unichar_isalpha(g_utf8_get_char(p)) || *p == ' ')) {
                     p = g_utf8_next_char(p);
-                    // Only consume up to the colon area
                     if (*p == ':') break;
                     if (*p == '\0') break;
                 }
-                // Skip optional " N" (space + digits)
                 if (*p == ' ') {
                     const char *q = p + 1;
                     while (*q >= '0' && *q <= '9') q++;
                     if (*q == ':') p = q;
                 }
-                // If we hit a colon, this line starts with a speaker label
                 const char *content_start;
                 if (*p == ':') {
-                    // Skip past the colon and any space
                     content_start = p + 1;
                     while (*content_start == ' ' || *content_start == '\t') content_start++;
                 } else {
                     content_start = line;
                 }
-                
-                char *lower = g_utf8_strdown(content_start, -1);
+
+                // Remove "Word Number" participant pseudonyms anywhere in the content
+                // e.g. "como dice Estudiante 2 en clase" -> "como dice  en clase"
+                char *cleaned = participant_re
+                    ? g_regex_replace(participant_re, content_start, -1, 0, "", 0, NULL)
+                    : g_strdup(content_start);
+
+                char *lower = g_utf8_strdown(cleaned ? cleaned : content_start, -1);
+                g_free(cleaned);
                 char **words = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>", -1);
                 for(int i = 0; words[i] != NULL; i++) {
                     if(strlen(words[i]) > 2) {
@@ -1053,6 +1057,8 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
         }
         sqlite3_finalize(stmt);
     }
+
+    if (participant_re) g_regex_unref(participant_re);
     
     GList *keys = g_hash_table_get_keys(counts);
     for(GList *l = keys; l != NULL; l = l->next) {
