@@ -998,19 +998,57 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
             if(!html) continue;
             
             char *text = strip_html(html);
-            char *lower = g_utf8_strdown(text, -1);
-            char **words = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>", -1);
-            for(int i = 0; words[i] != NULL; i++) {
-                if(strlen(words[i]) > 2) {
-                    if(!g_hash_table_contains(stop_words_set, words[i])) {
-                        gpointer val = g_hash_table_lookup(counts, words[i]);
-                        int cnt = val ? GPOINTER_TO_INT(val) : 0;
-                        g_hash_table_replace(counts, g_strdup(words[i]), GINT_TO_POINTER(cnt + 1));
+            
+            // Process line by line, stripping speaker labels at line start.
+            // Speaker labels match: "Word:" or "Word N:" (e.g. "Entrevistador:", "Estudiante 3:")
+            // They are identified by the pattern: word(s) at the very start of the line
+            // followed optionally by a space+number, then a colon.
+            char **lines = g_strsplit(text, "\n", -1);
+            for (int li = 0; lines[li] != NULL; li++) {
+                const char *line = lines[li];
+                // Check if line starts with a speaker label: match /^[A-Za-zÁÉÍÓÚáéíóúÑñ]+(\s+\d+)?:/
+                const char *p = line;
+                // Skip leading whitespace
+                while (*p == ' ' || *p == '\t') p++;
+                const char *word_start = p;
+                // Consume letters (including accented)
+                while (*p && (g_unichar_isalpha(g_utf8_get_char(p)) || *p == ' ')) {
+                    p = g_utf8_next_char(p);
+                    // Only consume up to the colon area
+                    if (*p == ':') break;
+                    if (*p == '\0') break;
+                }
+                // Skip optional " N" (space + digits)
+                if (*p == ' ') {
+                    const char *q = p + 1;
+                    while (*q >= '0' && *q <= '9') q++;
+                    if (*q == ':') p = q;
+                }
+                // If we hit a colon, this line starts with a speaker label
+                const char *content_start;
+                if (*p == ':') {
+                    // Skip past the colon and any space
+                    content_start = p + 1;
+                    while (*content_start == ' ' || *content_start == '\t') content_start++;
+                } else {
+                    content_start = line;
+                }
+                
+                char *lower = g_utf8_strdown(content_start, -1);
+                char **words = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>", -1);
+                for(int i = 0; words[i] != NULL; i++) {
+                    if(strlen(words[i]) > 2) {
+                        if(!g_hash_table_contains(stop_words_set, words[i])) {
+                            gpointer val = g_hash_table_lookup(counts, words[i]);
+                            int cnt = val ? GPOINTER_TO_INT(val) : 0;
+                            g_hash_table_replace(counts, g_strdup(words[i]), GINT_TO_POINTER(cnt + 1));
+                        }
                     }
                 }
+                g_strfreev(words);
+                g_free(lower);
             }
-            g_strfreev(words);
-            g_free(lower);
+            g_strfreev(lines);
             g_free(text);
         }
         sqlite3_finalize(stmt);
@@ -1313,7 +1351,7 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     // 4. Wordcloud
     GtkWidget *wc_view = create_wordcloud_view(state);
     AdwViewStackPage *p4 = adw_view_stack_add_titled(ADW_VIEW_STACK(viz_stack), wc_view, "wordcloud", "Frequencies");
-    adw_view_stack_page_set_icon_name(p4, "large-text-symbolic");
+    adw_view_stack_page_set_icon_name(p4, "format-text-rich-symbolic");
     
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), viz_stack);
     
