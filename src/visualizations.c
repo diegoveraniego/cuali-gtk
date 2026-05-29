@@ -1158,47 +1158,92 @@ GtkWidget* create_wordcloud_view(CualiAppState *state) {
 // --- Export Logic ---
 static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpointer user_data) {
     GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), res, NULL);
-    if (!file) return;
+    char *viz_type = (char *)user_data;
+    
+    if (!file) {
+        g_free(viz_type);
+        return;
+    }
 
     char *path = g_file_get_path(file);
     g_object_unref(file);
-    if (!path) return;
+    if (!path) {
+        g_free(viz_type);
+        return;
+    }
 
-    const char *viz_type = (const char *)user_data;
-
-    if (g_strcmp0(viz_type, "heatmap") == 0 && g_hm_state && g_hm_area) {
+    if (g_strcmp0(viz_type, "whiteboard") == 0 && g_wb_state && g_wb_area) {
+        int width = 1200;
+        int height = 800;
+        cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
+        cairo_t *cr = cairo_create(surface);
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_paint(cr);
+        draw_whiteboard(GTK_DRAWING_AREA(g_wb_area), cr, width, height, g_wb_state);
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
+    } else if (g_strcmp0(viz_type, "heatmap") == 0 && g_hm_state && g_hm_area) {
         double current_zoom = ((HeatmapState *)g_hm_state)->zoom;
         int width = 1200 * current_zoom;
         int height = (((HeatmapState *)g_hm_state)->num_tags * 35 + 100) * current_zoom;
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        
         cairo_set_source_rgb(cr, 1, 1, 1);
         cairo_paint(cr);
-        
         draw_heatmap(GTK_DRAWING_AREA(g_hm_area), cr, width, height, g_hm_state);
-        
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
+    } else if (g_strcmp0(viz_type, "matrix") == 0 && g_mat_state && g_mat_area) {
+        int width = 200 + ((TagDocState *)g_mat_state)->num_docs * 35;
+        int height = 200 + ((TagDocState *)g_mat_state)->num_tags * 25;
+        cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
+        cairo_t *cr = cairo_create(surface);
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_paint(cr);
+        draw_tagdoc(GTK_DRAWING_AREA(g_mat_area), cr, width, height, g_mat_state);
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
+    } else if (g_strcmp0(viz_type, "wordcloud") == 0 && g_wc_state && g_wc_area) {
+        int width = 800;
+        int height = 600;
+        cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
+        cairo_t *cr = cairo_create(surface);
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_paint(cr);
+        draw_wordcloud(GTK_DRAWING_AREA(g_wc_area), cr, width, height, g_wc_state);
         cairo_destroy(cr);
         cairo_surface_destroy(surface);
     }
-    
+
     g_free(path);
+    g_free(viz_type);
 }
 
 static void on_export_viz_clicked(GtkButton *btn, gpointer user_data) {
     GtkWidget *viz_stack = GTK_WIDGET(user_data);
     const char *visible_child_name = adw_view_stack_get_visible_child_name(ADW_VIEW_STACK(viz_stack));
-    
-    if (g_strcmp0(visible_child_name, "heatmap") != 0) {
-        return; // For now only heatmap export is supported
-    }
-    
+
     GtkFileDialog *dlg = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(dlg, "Exportar Co-ocurrencia a SVG");
-    gtk_file_dialog_set_initial_name(dlg, "co-ocurrencia.svg");
     
+    if (g_strcmp0(visible_child_name, "whiteboard") == 0) {
+        gtk_file_dialog_set_title(dlg, "Exportar Redes a SVG");
+        gtk_file_dialog_set_initial_name(dlg, "redes.svg");
+    } else if (g_strcmp0(visible_child_name, "heatmap") == 0) {
+        gtk_file_dialog_set_title(dlg, "Exportar Co-ocurrencia a SVG");
+        gtk_file_dialog_set_initial_name(dlg, "co-ocurrencia.svg");
+    } else if (g_strcmp0(visible_child_name, "matrix") == 0) {
+        gtk_file_dialog_set_title(dlg, "Exportar Matriz a SVG");
+        gtk_file_dialog_set_initial_name(dlg, "matriz.svg");
+    } else if (g_strcmp0(visible_child_name, "wordcloud") == 0) {
+        gtk_file_dialog_set_title(dlg, "Exportar Frecuencias a SVG");
+        gtk_file_dialog_set_initial_name(dlg, "frecuencias.svg");
+    } else {
+        g_object_unref(dlg);
+        return;
+    }
+
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(btn));
-    gtk_file_dialog_save(dlg, GTK_WINDOW(root), NULL, on_export_viz_save_response, (gpointer)"heatmap");
+    gtk_file_dialog_save(dlg, GTK_WINDOW(root), NULL, on_export_viz_save_response, g_strdup(visible_child_name));
     g_object_unref(dlg);
 }
 
