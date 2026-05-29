@@ -1035,6 +1035,28 @@ static gboolean wc_is_participant_name(WordCloudState *wc, const char *word) {
     return FALSE;
 }
 
+static gboolean wc_is_timestamp_line(const char *p) {
+    if (*p != '[') return FALSE;
+    p++;
+    int colons = 0;
+    int digits = 0;
+    while (*p) {
+        if (*p >= '0' && *p <= '9') {
+            digits++;
+        } else if (*p == ':') {
+            colons++;
+        } else if (*p == ']') {
+            p++;
+            while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+            return (*p == '\0' && colons >= 1 && digits >= 4);
+        } else {
+            return FALSE;
+        }
+        p++;
+    }
+    return FALSE;
+}
+
 static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     // Keep existing participant_names if already set, else load from file
     if (!wc->participant_names) {
@@ -1065,6 +1087,7 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                 const char *line = lines[li];
                 const char *p = line;
                 while (*p == ' ' || *p == '\t') p++;
+                if (wc_is_timestamp_line(p)) continue;
 
                 // Try to match speaker label: "Name" or "Name N" followed by ":"
                 const char *content_start = line;
