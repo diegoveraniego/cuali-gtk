@@ -1036,9 +1036,6 @@ static gboolean wc_is_participant_name(WordCloudState *wc, const char *word) {
 }
 
 static GtkTextBuffer *g_part_buf = NULL;
-static GtkTextBuffer *g_stopwords_buf = NULL;
-static GtkSwitch *g_stopwords_enable_switch = NULL;
-static GtkDropDown *g_stopwords_lang_dropdown = NULL;
 
 static const char *spanish_stopwords_str = 
     "que, de, en, la, el, un, es, y, a, más, qué, como, también, así, pero, "
@@ -1046,17 +1043,24 @@ static const char *spanish_stopwords_str =
     "esa, yo, tú, él, ella, nos, ellos, me, te, le, ya, muy, bien, pues, eh, "
     "mm, bueno, entonces, o, e, ni, hay, era, fue, ser, estar, tiene, han, "
     "había, sobre, su, sus, mi, mis, tu, tus, aquí, cuando, donde, porque, "
-    "aunque, sino, todo, todos, toda, todas, esto, eso, aquello";
+    "aunque, sino, todo, todos, toda, todas, esto, eso, aquello, sí, igual, "
+    "creo, claro, sea, uno, son, ese, nos, tener, cómo, hacer, cosas, mucho, "
+    "quizás, sé, está, veces, también, así, porque, ejemplo, igual, entonces, "
+    "mismo, nada, poco, poder, alguna, después, ahora, ahí, algo, siempre, "
+    "vamos, tenemos, tenía, manera, hecho, cada, entre, solo, otro, otra, "
+    "muchas, caso, vez, forma, sentido, tema, realidad, haber, esas, algún, "
+    "debería, importante, puede, tipo, les, da, va, po, mí, ríe, voy, risa, "
+    "risas, profe, ha, he, son, ver";
 
 static const char *english_stopwords_str = 
     "the, a, an, is, are, was, were, be, been, being, have, has, had, do, does, "
-    "did, will, would, could, should, may, might, shall, can, need, dare, ought, "
-    "of, in, on, at, by, for, with, about, against, between, through, during, "
-    "to, from, up, down, out, off, over, under, then, once, and, but, or, nor, "
-    "so, yet, both, either, neither, not, no, i, you, he, she, it, we, they, "
-    "me, him, her, us, them, my, your, his, its, our, their, this, that, these, "
-    "those, what, which, who, whom, when, where, why, how, all, each, every, "
-    "more, most, also, just, than, too, very, well, here, there, if, as";
+    "did, will, would, could, should, may, might, shall, can, of, in, on, at, "
+    "by, for, with, about, to, from, up, out, and, but, or, not, no, i, you, "
+    "he, she, it, we, they, me, him, her, us, them, my, your, his, its, our, "
+    "their, this, that, these, those, what, which, who, when, where, how, all, "
+    "each, more, most, also, just, than, too, very, well, here, there, if, as, "
+    "so, just, like, know, think, yeah, okay, right, thing, things, something, "
+    "really, actually, basically, literally";
 
 static char* wc_stopwords_path(CualiAppState *app_state) {
     return g_strdup_printf("%s/.cuali_stopwords_%d",
@@ -1163,6 +1167,7 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
 
     GRegex *timestamp_rx = g_regex_new("^\\[[\\d:]+\\]$", G_REGEX_DEFAULT, 0, NULL);
     GRegex *speaker_prefix_rx = g_regex_new("^([A-ZÁÉÍÓÚÑÜ][a-záéíóúñü]+)(\\s+\\d+)?\\s*:\\s*", G_REGEX_DEFAULT, 0, NULL);
+    GRegex *annotation_rx = g_regex_new("\\(.*?\\)", G_REGEX_DEFAULT, 0, NULL);
 
     GHashTable *counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     sqlite3_stmt *stmt = db_documents_get_all_contents(app_state->current_project_id);
@@ -1178,6 +1183,17 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                 const char *line = lines[li];
                 char *trimmed = g_strdup(line);
                 g_strstrip(trimmed);
+
+                // Strip parenthesized annotations (e.g. "(Risas)") from the line
+                char *no_annotations = NULL;
+                if (annotation_rx) {
+                    no_annotations = g_regex_replace(annotation_rx, trimmed, -1, 0, "", 0, NULL);
+                } else {
+                    no_annotations = g_strdup(trimmed);
+                }
+                g_free(trimmed);
+                g_strstrip(no_annotations);
+                trimmed = no_annotations;
 
                 /*
                  * Three-pass Google Pinpoint transcript filtering pipeline:
@@ -1239,6 +1255,7 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
 
                 // Traverse and filter
                 int i = 0;
+                int min_len = stopwords_enabled ? 3 : 2;
                 while (i < clean_tokens->len) {
                     char *w = g_ptr_array_index(clean_tokens, i);
                     gboolean skip = FALSE;
@@ -1252,7 +1269,7 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                     }
 
                     if (!skip) {
-                        if (strlen(w) > 1) {
+                        if (g_utf8_strlen(w, -1) >= min_len) {
                             gboolean is_stopword = FALSE;
                             if (stopword_set) {
                                 is_stopword = (g_hash_table_lookup(stopword_set, w) != NULL);
@@ -1290,6 +1307,7 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     }
     if (timestamp_rx) g_regex_unref(timestamp_rx);
     if (speaker_prefix_rx) g_regex_unref(speaker_prefix_rx);
+    if (annotation_rx) g_regex_unref(annotation_rx);
     if (stopword_set) g_hash_table_destroy(stopword_set);
     g_free(stopwords_language);
     g_free(stopwords_extra);
@@ -1547,7 +1565,7 @@ typedef struct {
     GtkSwitch *enable_switch;
     GtkDropDown *lang_dropdown;
     GtkTextBuffer *text_buf;
-    GtkPopover *popover;
+    AdwDialog *dialog;
 } WcStopwordsData;
 
 static void on_wc_stopwords_apply(GtkButton *btn, gpointer user_data) {
@@ -1583,7 +1601,125 @@ static void on_wc_stopwords_apply(GtkButton *btn, gpointer user_data) {
         if (g_wc_area) gtk_widget_queue_draw(g_wc_area);
     }
     
-    if (d->popover) gtk_popover_popdown(d->popover);
+    if (d->dialog) adw_dialog_close(ADW_DIALOG(d->dialog));
+}
+
+static void on_stopwords_dialog_closed(AdwDialog *dialog, gpointer user_data) {
+    WcStopwordsData *sd = (WcStopwordsData *)user_data;
+    g_free(sd);
+}
+
+static void show_stopwords_dialog(CualiAppState *state) {
+    GtkWidget *dialog = GTK_WIDGET(adw_dialog_new());
+    adw_dialog_set_title(ADW_DIALOG(dialog), "Stopwords");
+    adw_dialog_set_content_width(ADW_DIALOG(dialog), 400);
+    adw_dialog_set_content_height(ADW_DIALOG(dialog), 450);
+
+    GtkWidget *toolbar_view = adw_toolbar_view_new();
+    GtkWidget *header_bar = adw_header_bar_new();
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view), header_bar);
+
+    GtkWidget *content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(content_box, 16);
+    gtk_widget_set_margin_end(content_box, 16);
+    gtk_widget_set_margin_top(content_box, 16);
+    gtk_widget_set_margin_bottom(content_box, 16);
+
+    // 1. Switch row (using AdwActionRow with GtkSwitch)
+    GtkWidget *enable_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(enable_row), "Activar stopwords");
+    GtkWidget *enable_switch = gtk_switch_new();
+    gtk_widget_set_valign(enable_switch, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(enable_row), enable_switch);
+    gtk_box_append(GTK_BOX(content_box), enable_row);
+
+    // 2. Dropdown (using AdwActionRow with GtkDropDown)
+    GtkWidget *lang_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(lang_row), "Idioma base");
+    const char *langs[] = {"Español", "English", "Ambos", NULL};
+    GtkWidget *lang_dropdown = gtk_drop_down_new_from_strings(langs);
+    gtk_widget_set_valign(lang_dropdown, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(lang_row), lang_dropdown);
+    gtk_box_append(GTK_BOX(content_box), lang_row);
+
+    // 3. Labels
+    GtkWidget *extra_title_lbl = gtk_label_new("Palabras adicionales");
+    gtk_widget_set_halign(extra_title_lbl, GTK_ALIGN_START);
+    gtk_widget_add_css_class(extra_title_lbl, "heading");
+
+    GtkWidget *extra_subtitle_lbl = gtk_label_new("Una por línea. Se suman a la lista base.");
+    gtk_widget_set_halign(extra_subtitle_lbl, GTK_ALIGN_START);
+    gtk_widget_add_css_class(extra_subtitle_lbl, "dim-label");
+
+    GtkWidget *label_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_box_append(GTK_BOX(label_box), extra_title_lbl);
+    gtk_box_append(GTK_BOX(label_box), extra_subtitle_lbl);
+    gtk_box_append(GTK_BOX(content_box), label_box);
+
+    // 4. Scrolled TextView
+    GtkWidget *extra_scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(extra_scroll), 120);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(extra_scroll),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+
+    GtkWidget *extra_tv = gtk_text_view_new();
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(extra_tv), GTK_WRAP_WORD);
+    gtk_widget_add_css_class(extra_tv, "card");
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(extra_scroll), extra_tv);
+    gtk_box_append(GTK_BOX(content_box), extra_scroll);
+
+    GtkTextBuffer *extra_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(extra_tv));
+
+    // Load current values
+    gboolean st_enabled = FALSE;
+    char *st_lang = NULL;
+    char *st_extra = NULL;
+    wc_load_stopwords_settings(state, &st_enabled, &st_lang, &st_extra);
+
+    gtk_switch_set_active(GTK_SWITCH(enable_switch), st_enabled);
+    int st_idx = 0;
+    if (g_strcmp0(st_lang, "en") == 0) st_idx = 1;
+    else if (g_strcmp0(st_lang, "both") == 0) st_idx = 2;
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(lang_dropdown), st_idx);
+
+    GString *display_extra = g_string_new("");
+    if (st_extra && st_extra[0] != '\0') {
+        char **words = g_strsplit(st_extra, ",", -1);
+        for (int i = 0; words[i] != NULL; i++) {
+            if (display_extra->len > 0) g_string_append_c(display_extra, '\n');
+            g_string_append(display_extra, words[i]);
+        }
+        g_strfreev(words);
+    }
+    gtk_text_buffer_set_text(extra_buf, display_extra->str, -1);
+    g_string_free(display_extra, TRUE);
+
+    g_free(st_lang);
+    g_free(st_extra);
+
+    // 5. Button suggested suggested-action
+    GtkWidget *stop_apply_btn = gtk_button_new_with_label("Aplicar");
+    gtk_widget_add_css_class(stop_apply_btn, "suggested-action");
+    gtk_box_append(GTK_BOX(content_box), stop_apply_btn);
+
+    WcStopwordsData *sd = g_new0(WcStopwordsData, 1);
+    sd->app_state = state;
+    sd->enable_switch = GTK_SWITCH(enable_switch);
+    sd->lang_dropdown = GTK_DROP_DOWN(lang_dropdown);
+    sd->text_buf = extra_buf;
+    sd->dialog = ADW_DIALOG(dialog);
+
+    g_signal_connect(stop_apply_btn, "clicked", G_CALLBACK(on_wc_stopwords_apply), sd);
+    g_signal_connect(dialog, "closed", G_CALLBACK(on_stopwords_dialog_closed), sd);
+
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), content_box);
+    adw_dialog_set_child(ADW_DIALOG(dialog), toolbar_view);
+    adw_dialog_present(ADW_DIALOG(dialog), state->window);
+}
+
+static void on_stopwords_btn_clicked(GtkButton *btn, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    show_stopwords_dialog(state);
 }
 
 GtkWidget* create_visualizations_view(CualiAppState *state) {
@@ -1687,112 +1823,11 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(participants_btn), part_popover);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), participants_btn);
     
-    // Stopwords Config Button and Popover
-    GtkWidget *stopwords_btn = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(stopwords_btn), "preferences-system-symbolic");
+    // Stopwords Config Button (opens AdwDialog)
+    GtkWidget *stopwords_btn = gtk_button_new_from_icon_name("preferences-system-symbolic");
     gtk_widget_set_tooltip_text(stopwords_btn, "Stopwords");
     gtk_widget_add_css_class(stopwords_btn, "flat");
-    
-    GtkWidget *stop_popover = gtk_popover_new();
-    GtkWidget *stop_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_widget_set_margin_start(stop_box, 12);
-    gtk_widget_set_margin_end(stop_box, 12);
-    gtk_widget_set_margin_top(stop_box, 12);
-    gtk_widget_set_margin_bottom(stop_box, 12);
-    gtk_widget_set_size_request(stop_box, 260, -1);
-    
-    GtkWidget *stop_title_lbl = gtk_label_new("Stopwords");
-    gtk_widget_add_css_class(stop_title_lbl, "title-4");
-    gtk_widget_set_halign(stop_title_lbl, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(stop_box), stop_title_lbl);
-    
-    // Switch row
-    GtkWidget *enable_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    GtkWidget *enable_lbl = gtk_label_new("Activar stopwords");
-    gtk_widget_set_hexpand(enable_lbl, TRUE);
-    gtk_widget_set_halign(enable_lbl, GTK_ALIGN_START);
-    GtkWidget *enable_switch = gtk_switch_new();
-    gtk_box_append(GTK_BOX(enable_box), enable_lbl);
-    gtk_box_append(GTK_BOX(enable_box), enable_switch);
-    gtk_box_append(GTK_BOX(stop_box), enable_box);
-    
-    // Language selection dropdown
-    GtkWidget *lang_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    GtkWidget *lang_lbl = gtk_label_new("Idioma base:");
-    gtk_widget_set_halign(lang_lbl, GTK_ALIGN_START);
-    const char *langs[] = {"Español", "English", "Ambos", NULL};
-    GtkWidget *lang_dropdown = gtk_drop_down_new_from_strings(langs);
-    gtk_widget_set_hexpand(lang_dropdown, TRUE);
-    gtk_box_append(GTK_BOX(lang_box), lang_lbl);
-    gtk_box_append(GTK_BOX(lang_box), lang_dropdown);
-    gtk_box_append(GTK_BOX(stop_box), lang_box);
-    
-    // Custom words editor
-    GtkWidget *extra_lbl = gtk_label_new("Palabras adicionales (una por línea):");
-    gtk_widget_set_halign(extra_lbl, GTK_ALIGN_START);
-    gtk_widget_set_margin_top(extra_lbl, 4);
-    gtk_box_append(GTK_BOX(stop_box), extra_lbl);
-    
-    GtkWidget *extra_scroll = gtk_scrolled_window_new();
-    gtk_widget_set_size_request(extra_scroll, 260, 100);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(extra_scroll),
-                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    
-    GtkWidget *extra_tv = gtk_text_view_new();
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(extra_tv), GTK_WRAP_WORD);
-    gtk_widget_add_css_class(extra_tv, "card");
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(extra_scroll), extra_tv);
-    gtk_box_append(GTK_BOX(stop_box), extra_scroll);
-    
-    GtkTextBuffer *extra_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(extra_tv));
-    
-    g_stopwords_buf = extra_buf;
-    g_stopwords_enable_switch = GTK_SWITCH(enable_switch);
-    g_stopwords_lang_dropdown = GTK_DROP_DOWN(lang_dropdown);
-    
-    // Preload stopwords config
-    {
-        gboolean st_enabled = FALSE;
-        char *st_lang = NULL;
-        char *st_extra = NULL;
-        wc_load_stopwords_settings(state, &st_enabled, &st_lang, &st_extra);
-        
-        gtk_switch_set_active(GTK_SWITCH(enable_switch), st_enabled);
-        int st_idx = 0;
-        if (g_strcmp0(st_lang, "en") == 0) st_idx = 1;
-        else if (g_strcmp0(st_lang, "both") == 0) st_idx = 2;
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(lang_dropdown), st_idx);
-        
-        GString *display_extra = g_string_new("");
-        if (st_extra && st_extra[0] != '\0') {
-            char **words = g_strsplit(st_extra, ",", -1);
-            for (int i = 0; words[i] != NULL; i++) {
-                if (display_extra->len > 0) g_string_append_c(display_extra, '\n');
-                g_string_append(display_extra, words[i]);
-            }
-            g_strfreev(words);
-        }
-        gtk_text_buffer_set_text(extra_buf, display_extra->str, -1);
-        g_string_free(display_extra, TRUE);
-        
-        g_free(st_lang);
-        g_free(st_extra);
-    }
-    
-    GtkWidget *stop_apply_btn = gtk_button_new_with_label("Aplicar");
-    gtk_widget_add_css_class(stop_apply_btn, "suggested-action");
-    gtk_box_append(GTK_BOX(stop_box), stop_apply_btn);
-    
-    WcStopwordsData *sd = g_new0(WcStopwordsData, 1);
-    sd->app_state = state;
-    sd->enable_switch = GTK_SWITCH(enable_switch);
-    sd->lang_dropdown = GTK_DROP_DOWN(lang_dropdown);
-    sd->text_buf = extra_buf;
-    sd->popover = GTK_POPOVER(stop_popover);
-    g_signal_connect(stop_apply_btn, "clicked", G_CALLBACK(on_wc_stopwords_apply), sd);
-    
-    gtk_popover_set_child(GTK_POPOVER(stop_popover), stop_box);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(stopwords_btn), stop_popover);
+    g_signal_connect(stopwords_btn, "clicked", G_CALLBACK(on_stopwords_btn_clicked), state);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), stopwords_btn);
     
     GtkWidget *export_btn = gtk_button_new_from_icon_name("document-save-symbolic");
@@ -1838,34 +1873,7 @@ void refresh_visualizations(CualiAppState *state) {
         g_free(pp);
     }
 
-    if (g_stopwords_buf && g_stopwords_enable_switch && g_stopwords_lang_dropdown) {
-        gboolean enabled = FALSE;
-        char *language = NULL;
-        char *extra = NULL;
-        wc_load_stopwords_settings(state, &enabled, &language, &extra);
 
-        gtk_switch_set_active(g_stopwords_enable_switch, enabled);
-
-        int idx = 0;
-        if (g_strcmp0(language, "en") == 0) idx = 1;
-        else if (g_strcmp0(language, "both") == 0) idx = 2;
-        gtk_drop_down_set_selected(g_stopwords_lang_dropdown, idx);
-
-        GString *display_extra = g_string_new("");
-        if (extra && extra[0] != '\0') {
-            char **words = g_strsplit(extra, ",", -1);
-            for (int i = 0; words[i] != NULL; i++) {
-                if (display_extra->len > 0) g_string_append_c(display_extra, '\n');
-                g_string_append(display_extra, words[i]);
-            }
-            g_strfreev(words);
-        }
-        gtk_text_buffer_set_text(g_stopwords_buf, display_extra->str, -1);
-        g_string_free(display_extra, TRUE);
-
-        g_free(language);
-        g_free(extra);
-    }
 
     if (g_wb_state) {
         free_whiteboard_data((WhiteboardState *)g_wb_state);
