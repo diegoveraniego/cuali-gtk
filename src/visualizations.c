@@ -1035,6 +1035,82 @@ static gboolean wc_is_participant_name(WordCloudState *wc, const char *word) {
     return FALSE;
 }
 
+static GtkTextBuffer *g_part_buf = NULL;
+static GtkTextBuffer *g_stopwords_buf = NULL;
+static GtkSwitch *g_stopwords_enable_switch = NULL;
+static GtkDropDown *g_stopwords_lang_dropdown = NULL;
+
+static const char *spanish_stopwords_str = 
+    "que, de, en, la, el, un, es, y, a, más, qué, como, también, así, pero, "
+    "por, con, para, si, no, se, lo, al, del, las, los, una, este, esta, ese, "
+    "esa, yo, tú, él, ella, nos, ellos, me, te, le, ya, muy, bien, pues, eh, "
+    "mm, bueno, entonces, o, e, ni, hay, era, fue, ser, estar, tiene, han, "
+    "había, sobre, su, sus, mi, mis, tu, tus, aquí, cuando, donde, porque, "
+    "aunque, sino, todo, todos, toda, todas, esto, eso, aquello";
+
+static const char *english_stopwords_str = 
+    "the, a, an, is, are, was, were, be, been, being, have, has, had, do, does, "
+    "did, will, would, could, should, may, might, shall, can, need, dare, ought, "
+    "of, in, on, at, by, for, with, about, against, between, through, during, "
+    "to, from, up, down, out, off, over, under, then, once, and, but, or, nor, "
+    "so, yet, both, either, neither, not, no, i, you, he, she, it, we, they, "
+    "me, him, her, us, them, my, your, his, its, our, their, this, that, these, "
+    "those, what, which, who, whom, when, where, why, how, all, each, every, "
+    "more, most, also, just, than, too, very, well, here, there, if, as";
+
+static char* wc_stopwords_path(CualiAppState *app_state) {
+    return g_strdup_printf("%s/.cuali_stopwords_%d",
+                           g_get_home_dir(), app_state->current_project_id);
+}
+
+static void wc_load_stopwords_settings(CualiAppState *app_state, gboolean *enabled, char **language, char **extra) {
+    *enabled = FALSE;
+    *language = g_strdup("es");
+    *extra = g_strdup("");
+
+    char *path = wc_stopwords_path(app_state);
+    char *content = NULL;
+    if (g_file_get_contents(path, &content, NULL, NULL)) {
+        char **lines = g_strsplit(content, "\n", -1);
+        for (int i = 0; lines[i] != NULL; i++) {
+            char *line = g_strstrip(lines[i]);
+            if (g_str_has_prefix(line, "enabled=")) {
+                *enabled = (strcmp(line + 8, "1") == 0);
+            } else if (g_str_has_prefix(line, "language=")) {
+                g_free(*language);
+                *language = g_strdup(line + 9);
+            } else if (g_str_has_prefix(line, "extra=")) {
+                g_free(*extra);
+                *extra = g_strdup(line + 6);
+            }
+        }
+        g_strfreev(lines);
+        g_free(content);
+    }
+    g_free(path);
+}
+
+static void wc_save_stopwords_settings(CualiAppState *app_state, gboolean enabled, const char *language, const char *extra) {
+    char *path = wc_stopwords_path(app_state);
+    char *content = g_strdup_printf("enabled=%d\nlanguage=%s\nextra=%s\n",
+                                    enabled ? 1 : 0, language ? language : "es", extra ? extra : "");
+    g_file_set_contents(path, content, -1, NULL);
+    g_free(content);
+    g_free(path);
+}
+
+static void wc_add_stopwords_to_set(GHashTable *set, const char *str) {
+    char **words = g_strsplit_set(str, ", \t\n\r", -1);
+    for (int i = 0; words[i] != NULL; i++) {
+        char *trimmed = g_strstrip(words[i]);
+        if (trimmed[0] != '\0') {
+            char *lower = g_utf8_strdown(trimmed, -1);
+            g_hash_table_replace(set, lower, GINT_TO_POINTER(1));
+        }
+    }
+    g_strfreev(words);
+}
+
 static gboolean wc_is_pure_digit(const char *s) {
     if (!s || *s == '\0') return FALSE;
     while (*s) {
@@ -1052,6 +1128,25 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     wc->words = NULL;
     wc->max_freq = 1;
     wc->zoom = wc->zoom > 0 ? wc->zoom : 1.0;
+
+    gboolean stopwords_enabled = FALSE;
+    char *stopwords_language = NULL;
+    char *stopwords_extra = NULL;
+    wc_load_stopwords_settings(app_state, &stopwords_enabled, &stopwords_language, &stopwords_extra);
+
+    GHashTable *stopword_set = NULL;
+    if (stopwords_enabled) {
+        stopword_set = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+        if (g_strcmp0(stopwords_language, "es") == 0 || g_strcmp0(stopwords_language, "both") == 0) {
+            wc_add_stopwords_to_set(stopword_set, spanish_stopwords_str);
+        }
+        if (g_strcmp0(stopwords_language, "en") == 0 || g_strcmp0(stopwords_language, "both") == 0) {
+            wc_add_stopwords_to_set(stopword_set, english_stopwords_str);
+        }
+        if (stopwords_extra && stopwords_extra[0] != '\0') {
+            wc_add_stopwords_to_set(stopword_set, stopwords_extra);
+        }
+    }
 
     GRegex *timestamp_rx = g_regex_new("^\\s*\\[[\\d:]+\\]\\s*$", G_REGEX_DEFAULT, 0, NULL);
     GRegex *speaker_rx = g_regex_new("^\\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\\s*)+\\d*\\s*:\\s*$", G_REGEX_DEFAULT, 0, NULL);
@@ -1135,9 +1230,15 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
 
                     if (!skip) {
                         if (strlen(w) > 1) {
-                            gpointer val = g_hash_table_lookup(counts, w);
-                            int cnt = val ? GPOINTER_TO_INT(val) : 0;
-                            g_hash_table_replace(counts, g_strdup(w), GINT_TO_POINTER(cnt + 1));
+                            gboolean is_stopword = FALSE;
+                            if (stopword_set) {
+                                is_stopword = (g_hash_table_lookup(stopword_set, w) != NULL);
+                            }
+                            if (!is_stopword) {
+                                gpointer val = g_hash_table_lookup(counts, w);
+                                int cnt = val ? GPOINTER_TO_INT(val) : 0;
+                                g_hash_table_replace(counts, g_strdup(w), GINT_TO_POINTER(cnt + 1));
+                            }
                         }
                         i++;
                     }
@@ -1164,6 +1265,9 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     }
     if (timestamp_rx) g_regex_unref(timestamp_rx);
     if (speaker_rx) g_regex_unref(speaker_rx);
+    if (stopword_set) g_hash_table_destroy(stopword_set);
+    g_free(stopwords_language);
+    g_free(stopwords_extra);
 }
 
 static void free_wordcloud_data(WordCloudState *wc) {
@@ -1413,6 +1517,50 @@ static void on_wc_participants_apply(GtkButton *btn, gpointer user_data) {
     if (d->popover) gtk_popover_popdown(d->popover);
 }
 
+typedef struct {
+    CualiAppState *app_state;
+    GtkSwitch *enable_switch;
+    GtkDropDown *lang_dropdown;
+    GtkTextBuffer *text_buf;
+    GtkPopover *popover;
+} WcStopwordsData;
+
+static void on_wc_stopwords_apply(GtkButton *btn, gpointer user_data) {
+    WcStopwordsData *d = (WcStopwordsData *)user_data;
+    gboolean enabled = gtk_switch_get_active(d->enable_switch);
+    guint selected = gtk_drop_down_get_selected(d->lang_dropdown);
+    const char *language = "es";
+    if (selected == 1) language = "en";
+    else if (selected == 2) language = "both";
+    
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(d->text_buf, &start, &end);
+    char *extra = gtk_text_buffer_get_text(d->text_buf, &start, &end, FALSE);
+    
+    GString *clean_extra = g_string_new("");
+    char **lines = g_strsplit(extra, "\n", -1);
+    for (int i = 0; lines[i] != NULL; i++) {
+        char *trimmed = g_strstrip(lines[i]);
+        if (trimmed[0] != '\0') {
+            if (clean_extra->len > 0) g_string_append_c(clean_extra, ',');
+            g_string_append(clean_extra, trimmed);
+        }
+    }
+    g_strfreev(lines);
+    g_free(extra);
+    
+    wc_save_stopwords_settings(d->app_state, enabled, language, clean_extra->str);
+    g_string_free(clean_extra, TRUE);
+    
+    if (g_wc_state) {
+        free_wordcloud_data((WordCloudState *)g_wc_state);
+        load_wordcloud_data(d->app_state, (WordCloudState *)g_wc_state);
+        if (g_wc_area) gtk_widget_queue_draw(g_wc_area);
+    }
+    
+    if (d->popover) gtk_popover_popdown(d->popover);
+}
+
 GtkWidget* create_visualizations_view(CualiAppState *state) {
     GtkWidget *toolbar_view = adw_toolbar_view_new();
     
@@ -1488,6 +1636,7 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     gtk_box_append(GTK_BOX(part_box), part_scroll);
     
     GtkTextBuffer *part_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(part_tv));
+    g_part_buf = part_buf;
     // Pre-load existing participants
     {
         char *pp = wc_participants_path(state);
@@ -1512,6 +1661,114 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     gtk_popover_set_child(GTK_POPOVER(part_popover), part_box);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(participants_btn), part_popover);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), participants_btn);
+    
+    // Stopwords Config Button and Popover
+    GtkWidget *stopwords_btn = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(stopwords_btn), "preferences-system-symbolic");
+    gtk_widget_set_tooltip_text(stopwords_btn, "Stopwords");
+    gtk_widget_add_css_class(stopwords_btn, "flat");
+    
+    GtkWidget *stop_popover = gtk_popover_new();
+    GtkWidget *stop_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_start(stop_box, 12);
+    gtk_widget_set_margin_end(stop_box, 12);
+    gtk_widget_set_margin_top(stop_box, 12);
+    gtk_widget_set_margin_bottom(stop_box, 12);
+    gtk_widget_set_size_request(stop_box, 260, -1);
+    
+    GtkWidget *stop_title_lbl = gtk_label_new("Stopwords");
+    gtk_widget_add_css_class(stop_title_lbl, "title-4");
+    gtk_widget_set_halign(stop_title_lbl, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(stop_box), stop_title_lbl);
+    
+    // Switch row
+    GtkWidget *enable_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *enable_lbl = gtk_label_new("Activar stopwords");
+    gtk_widget_set_hexpand(enable_lbl, TRUE);
+    gtk_widget_set_halign(enable_lbl, GTK_ALIGN_START);
+    GtkWidget *enable_switch = gtk_switch_new();
+    gtk_box_append(GTK_BOX(enable_box), enable_lbl);
+    gtk_box_append(GTK_BOX(enable_box), enable_switch);
+    gtk_box_append(GTK_BOX(stop_box), enable_box);
+    
+    // Language selection dropdown
+    GtkWidget *lang_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *lang_lbl = gtk_label_new("Idioma base:");
+    gtk_widget_set_halign(lang_lbl, GTK_ALIGN_START);
+    const char *langs[] = {"Español", "English", "Ambos", NULL};
+    GtkWidget *lang_dropdown = gtk_drop_down_new_from_strings(langs);
+    gtk_widget_set_hexpand(lang_dropdown, TRUE);
+    gtk_box_append(GTK_BOX(lang_box), lang_lbl);
+    gtk_box_append(GTK_BOX(lang_box), lang_dropdown);
+    gtk_box_append(GTK_BOX(stop_box), lang_box);
+    
+    // Custom words editor
+    GtkWidget *extra_lbl = gtk_label_new("Palabras adicionales (una por línea):");
+    gtk_widget_set_halign(extra_lbl, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(extra_lbl, 4);
+    gtk_box_append(GTK_BOX(stop_box), extra_lbl);
+    
+    GtkWidget *extra_scroll = gtk_scrolled_window_new();
+    gtk_widget_set_size_request(extra_scroll, 260, 100);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(extra_scroll),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    
+    GtkWidget *extra_tv = gtk_text_view_new();
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(extra_tv), GTK_WRAP_WORD);
+    gtk_widget_add_css_class(extra_tv, "card");
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(extra_scroll), extra_tv);
+    gtk_box_append(GTK_BOX(stop_box), extra_scroll);
+    
+    GtkTextBuffer *extra_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(extra_tv));
+    
+    g_stopwords_buf = extra_buf;
+    g_stopwords_enable_switch = GTK_SWITCH(enable_switch);
+    g_stopwords_lang_dropdown = GTK_DROP_DOWN(lang_dropdown);
+    
+    // Preload stopwords config
+    {
+        gboolean st_enabled = FALSE;
+        char *st_lang = NULL;
+        char *st_extra = NULL;
+        wc_load_stopwords_settings(state, &st_enabled, &st_lang, &st_extra);
+        
+        gtk_switch_set_active(GTK_SWITCH(enable_switch), st_enabled);
+        int st_idx = 0;
+        if (g_strcmp0(st_lang, "en") == 0) st_idx = 1;
+        else if (g_strcmp0(st_lang, "both") == 0) st_idx = 2;
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(lang_dropdown), st_idx);
+        
+        GString *display_extra = g_string_new("");
+        if (st_extra && st_extra[0] != '\0') {
+            char **words = g_strsplit(st_extra, ",", -1);
+            for (int i = 0; words[i] != NULL; i++) {
+                if (display_extra->len > 0) g_string_append_c(display_extra, '\n');
+                g_string_append(display_extra, words[i]);
+            }
+            g_strfreev(words);
+        }
+        gtk_text_buffer_set_text(extra_buf, display_extra->str, -1);
+        g_string_free(display_extra, TRUE);
+        
+        g_free(st_lang);
+        g_free(st_extra);
+    }
+    
+    GtkWidget *stop_apply_btn = gtk_button_new_with_label("Aplicar");
+    gtk_widget_add_css_class(stop_apply_btn, "suggested-action");
+    gtk_box_append(GTK_BOX(stop_box), stop_apply_btn);
+    
+    WcStopwordsData *sd = g_new0(WcStopwordsData, 1);
+    sd->app_state = state;
+    sd->enable_switch = GTK_SWITCH(enable_switch);
+    sd->lang_dropdown = GTK_DROP_DOWN(lang_dropdown);
+    sd->text_buf = extra_buf;
+    sd->popover = GTK_POPOVER(stop_popover);
+    g_signal_connect(stop_apply_btn, "clicked", G_CALLBACK(on_wc_stopwords_apply), sd);
+    
+    gtk_popover_set_child(GTK_POPOVER(stop_popover), stop_box);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(stopwords_btn), stop_popover);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), stopwords_btn);
     
     GtkWidget *export_btn = gtk_button_new_from_icon_name("document-save-symbolic");
     gtk_widget_set_tooltip_text(export_btn, "Exportar visualización a SVG");
@@ -1544,6 +1801,47 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
 }
 
 void refresh_visualizations(CualiAppState *state) {
+    if (g_part_buf) {
+        char *pp = wc_participants_path(state);
+        char *existing = NULL;
+        if (g_file_get_contents(pp, &existing, NULL, NULL)) {
+            gtk_text_buffer_set_text(g_part_buf, existing, -1);
+            g_free(existing);
+        } else {
+            gtk_text_buffer_set_text(g_part_buf, "", -1);
+        }
+        g_free(pp);
+    }
+
+    if (g_stopwords_buf && g_stopwords_enable_switch && g_stopwords_lang_dropdown) {
+        gboolean enabled = FALSE;
+        char *language = NULL;
+        char *extra = NULL;
+        wc_load_stopwords_settings(state, &enabled, &language, &extra);
+
+        gtk_switch_set_active(g_stopwords_enable_switch, enabled);
+
+        int idx = 0;
+        if (g_strcmp0(language, "en") == 0) idx = 1;
+        else if (g_strcmp0(language, "both") == 0) idx = 2;
+        gtk_drop_down_set_selected(g_stopwords_lang_dropdown, idx);
+
+        GString *display_extra = g_string_new("");
+        if (extra && extra[0] != '\0') {
+            char **words = g_strsplit(extra, ",", -1);
+            for (int i = 0; words[i] != NULL; i++) {
+                if (display_extra->len > 0) g_string_append_c(display_extra, '\n');
+                g_string_append(display_extra, words[i]);
+            }
+            g_strfreev(words);
+        }
+        gtk_text_buffer_set_text(g_stopwords_buf, display_extra->str, -1);
+        g_string_free(display_extra, TRUE);
+
+        g_free(language);
+        g_free(extra);
+    }
+
     if (g_wb_state) {
         free_whiteboard_data((WhiteboardState *)g_wb_state);
         load_whiteboard_data(state, (WhiteboardState *)g_wb_state);
