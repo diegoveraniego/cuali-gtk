@@ -958,6 +958,8 @@ typedef struct {
     int max_freq;
     double zoom;
     int width, height;
+    char **participant_names; // NULL-terminated list of participant names to exclude
+    int num_participants;
 } WordCloudState;
 
 static gint compare_word_freq(gconstpointer a, gconstpointer b) {
@@ -985,16 +987,62 @@ static char *strip_html(const char *html) {
     return g_string_free(out, FALSE);
 }
 
+/* Load/save participant names from a per-project file */
+static char* wc_participants_path(CualiAppState *app_state) {
+    return g_strdup_printf("%s/.cuali_participants_%d",
+                          g_get_home_dir(), app_state->current_project_id);
+}
+
+static void wc_load_participants(CualiAppState *app_state, WordCloudState *wc) {
+    if (wc->participant_names) {
+        g_strfreev(wc->participant_names);
+        wc->participant_names = NULL;
+        wc->num_participants = 0;
+    }
+    char *path = wc_participants_path(app_state);
+    char *content = NULL;
+    if (g_file_get_contents(path, &content, NULL, NULL)) {
+        wc->participant_names = g_strsplit(content, "\n", -1);
+        // Count non-empty
+        wc->num_participants = 0;
+        for (int i = 0; wc->participant_names[i] != NULL; i++) {
+            char *trimmed = g_strstrip(wc->participant_names[i]);
+            if (trimmed[0] != '\0') wc->num_participants++;
+        }
+        g_free(content);
+    }
+    g_free(path);
+}
+
+static void wc_save_participants(CualiAppState *app_state, const char *text) {
+    char *path = wc_participants_path(app_state);
+    g_file_set_contents(path, text ? text : "", -1, NULL);
+    g_free(path);
+}
+
+static gboolean wc_is_participant_name(WordCloudState *wc, const char *word) {
+    if (!wc->participant_names || !word) return FALSE;
+    char *lower_word = g_utf8_strdown(word, -1);
+    for (int i = 0; wc->participant_names[i] != NULL; i++) {
+        char *name = g_strstrip(wc->participant_names[i]);
+        if (name[0] == '\0') continue;
+        char *lower_name = g_utf8_strdown(name, -1);
+        gboolean match = (g_strcmp0(lower_word, lower_name) == 0);
+        g_free(lower_name);
+        if (match) { g_free(lower_word); return TRUE; }
+    }
+    g_free(lower_word);
+    return FALSE;
+}
+
 static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
+    // Keep existing participant_names if already set, else load from file
+    if (!wc->participant_names) {
+        wc_load_participants(app_state, wc);
+    }
     wc->words = NULL;
     wc->max_freq = 1;
-    wc->zoom = 1.0;
-
-    // Regex to strip "Word Number" patterns anywhere in text (e.g. "Estudiante 2", "Entrevistador 12")
-    // These are participant pseudonyms and should not be counted as meaningful words.
-    GRegex *participant_re = g_regex_new(
-        "[A-Z\\xc0-\\xd6\\xd8-\\xde][a-z\\xe0-\\xf6\\xf8-\\xff]+(\\s+\\d+)",
-        G_REGEX_OPTIMIZE, 0, NULL);
+    wc->zoom = wc->zoom > 0 ? wc->zoom : 1.0;
 
     GHashTable *counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     sqlite3_stmt *stmt = db_documents_get_all_contents(app_state->current_project_id);
@@ -1005,47 +1053,61 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
 
             char *text = strip_html(html);
 
-            // Process line by line, stripping speaker labels at line start.
-            // Speaker labels match: "Word:" or "Word N:" (e.g. "Entrevistador:", "Estudiante 3:")
+            // Process line by line.
+            // If a line starts with a participant name (optionally followed by a number
+            // and a colon), skip that name token and count only the dialog content.
             char **lines = g_strsplit(text, "\n", -1);
             for (int li = 0; lines[li] != NULL; li++) {
                 const char *line = lines[li];
-                // Check if line starts with a speaker label: match /^[Letters]+(\s+\d+)?:/
                 const char *p = line;
                 while (*p == ' ' || *p == '\t') p++;
-                while (*p && (g_unichar_isalpha(g_utf8_get_char(p)) || *p == ' ')) {
-                    p = g_utf8_next_char(p);
-                    if (*p == ':') break;
-                    if (*p == '\0') break;
-                }
-                if (*p == ' ') {
-                    const char *q = p + 1;
-                    while (*q >= '0' && *q <= '9') q++;
-                    if (*q == ':') p = q;
-                }
-                const char *content_start;
-                if (*p == ':') {
-                    content_start = p + 1;
-                    while (*content_start == ' ' || *content_start == '\t') content_start++;
-                } else {
-                    content_start = line;
+
+                // Try to match speaker label: "Name" or "Name N" followed by ":"
+                const char *content_start = line;
+                if (wc->num_participants > 0) {
+                    for (int ni = 0; wc->participant_names[ni] != NULL; ni++) {
+                        char *name = g_strstrip(wc->participant_names[ni]);
+                        if (name[0] == '\0') continue;
+                        gsize nlen = strlen(name);
+                        if (g_ascii_strncasecmp(p, name, nlen) == 0) {
+                            const char *after = p + nlen;
+                            // Optional " N"
+                            if (*after == ' ') {
+                                const char *q = after + 1;
+                                while (*q >= '0' && *q <= '9') q++;
+                                if (*q == ':') after = q;
+                            }
+                            if (*after == ':') {
+                                content_start = after + 1;
+                                while (*content_start == ' ' || *content_start == '\t') content_start++;
+                            }
+                            break;
+                        }
+                    }
                 }
 
-                // Remove "Word Number" participant pseudonyms anywhere in the content
-                // e.g. "como dice Estudiante 2 en clase" -> "como dice  en clase"
-                char *cleaned = participant_re
-                    ? g_regex_replace(participant_re, content_start, -1, 0, "", 0, NULL)
-                    : g_strdup(content_start);
-
-                char *lower = g_utf8_strdown(cleaned ? cleaned : content_start, -1);
-                g_free(cleaned);
-                char **words = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>", -1);
+                char *lower = g_utf8_strdown(content_start, -1);
+                char **words = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>[]{}—–", -1);
                 for(int i = 0; words[i] != NULL; i++) {
-                    if(strlen(words[i]) > 2) {
-                        if(!g_hash_table_contains(stop_words_set, words[i])) {
-                            gpointer val = g_hash_table_lookup(counts, words[i]);
+                    char *w = g_strstrip(words[i]);
+                    if(strlen(w) > 1) {
+                        // Skip "Name N" patterns anywhere in dialog
+                        // (e.g. "como dijo Estudiante 2 ayer")
+                        if (words[i+1] != NULL) {
+                            char *next = g_strstrip(words[i+1]);
+                            // next is all digits?
+                            gboolean next_is_num = (strlen(next) > 0);
+                            for (const char *c = next; *c && next_is_num; c++)
+                                if (*c < '0' || *c > '9') next_is_num = FALSE;
+                            if (next_is_num && wc_is_participant_name(wc, w)) {
+                                i++; // skip the number token too
+                                continue;
+                            }
+                        }
+                        if (!wc_is_participant_name(wc, w)) {
+                            gpointer val = g_hash_table_lookup(counts, w);
                             int cnt = val ? GPOINTER_TO_INT(val) : 0;
-                            g_hash_table_replace(counts, g_strdup(words[i]), GINT_TO_POINTER(cnt + 1));
+                            g_hash_table_replace(counts, g_strdup(w), GINT_TO_POINTER(cnt + 1));
                         }
                     }
                 }
@@ -1057,9 +1119,6 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
         }
         sqlite3_finalize(stmt);
     }
-
-    if (participant_re) g_regex_unref(participant_re);
-    
     GList *keys = g_hash_table_get_keys(counts);
     for(GList *l = keys; l != NULL; l = l->next) {
         WordFreq *wf = g_new(WordFreq, 1);
@@ -1179,8 +1238,6 @@ static WordCloudState *g_wc_state = NULL;
 static GtkWidget *g_wc_area = NULL;
 
 GtkWidget* create_wordcloud_view(CualiAppState *state) {
-    init_stopwords();
-    
     WordCloudState *wc = g_new0(WordCloudState, 1);
     load_wordcloud_data(state, wc);
     g_wc_state = wc;
@@ -1297,6 +1354,33 @@ static void on_filter_changed(GtkRange *range, gpointer user_data) {
     refresh_visualizations(state);
 }
 
+typedef struct {
+    CualiAppState *app_state;
+    GtkTextBuffer *text_buf;
+    GtkPopover *popover;
+} WcParticipantsData;
+
+static void on_wc_participants_apply(GtkButton *btn, gpointer user_data) {
+    WcParticipantsData *d = (WcParticipantsData *)user_data;
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(d->text_buf, &start, &end);
+    char *text = gtk_text_buffer_get_text(d->text_buf, &start, &end, FALSE);
+    
+    // Save to disk
+    wc_save_participants(d->app_state, text);
+    g_free(text);
+    
+    // Reload participant list and refresh word cloud
+    if (g_wc_state) {
+        wc_load_participants(d->app_state, (WordCloudState *)g_wc_state);
+        free_wordcloud_data((WordCloudState *)g_wc_state);
+        load_wordcloud_data(d->app_state, (WordCloudState *)g_wc_state);
+        if (g_wc_area) gtk_widget_queue_draw(g_wc_area);
+    }
+    
+    if (d->popover) gtk_popover_popdown(d->popover);
+}
+
 GtkWidget* create_visualizations_view(CualiAppState *state) {
     GtkWidget *toolbar_view = adw_toolbar_view_new();
     
@@ -1333,6 +1417,69 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(filter_btn), popover);
     
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), filter_btn);
+    
+    // Participants config button (for Frequencies tab)
+    GtkWidget *participants_btn = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(participants_btn), "system-users-symbolic");
+    gtk_widget_set_tooltip_text(participants_btn, "Participantes a excluir de Frequencies");
+    gtk_widget_add_css_class(participants_btn, "flat");
+    
+    GtkWidget *part_popover = gtk_popover_new();
+    GtkWidget *part_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_start(part_box, 12);
+    gtk_widget_set_margin_end(part_box, 12);
+    gtk_widget_set_margin_top(part_box, 12);
+    gtk_widget_set_margin_bottom(part_box, 12);
+    gtk_widget_set_size_request(part_box, 260, -1);
+    
+    GtkWidget *part_title = gtk_label_new("Nombres de participantes");
+    gtk_widget_add_css_class(part_title, "title-4");
+    gtk_widget_set_halign(part_title, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(part_box), part_title);
+    
+    GtkWidget *part_subtitle = gtk_label_new("Uno por línea. Se excluyen como label al inicio de párrafo y como 'Nombre N' en cualquier parte del texto.");
+    gtk_label_set_wrap(GTK_LABEL(part_subtitle), TRUE);
+    gtk_widget_add_css_class(part_subtitle, "caption");
+    gtk_widget_set_halign(part_subtitle, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(part_box), part_subtitle);
+    
+    GtkWidget *part_scroll = gtk_scrolled_window_new();
+    gtk_widget_set_size_request(part_scroll, 260, 140);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(part_scroll),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    
+    GtkWidget *part_tv = gtk_text_view_new();
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(part_tv), GTK_WRAP_WORD);
+    gtk_widget_add_css_class(part_tv, "card");
+    gtk_widget_set_margin_top(part_tv, 4);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(part_scroll), part_tv);
+    gtk_box_append(GTK_BOX(part_box), part_scroll);
+    
+    GtkTextBuffer *part_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(part_tv));
+    // Pre-load existing participants
+    {
+        char *pp = wc_participants_path(state);
+        char *existing = NULL;
+        if (g_file_get_contents(pp, &existing, NULL, NULL)) {
+            gtk_text_buffer_set_text(part_buf, existing, -1);
+            g_free(existing);
+        }
+        g_free(pp);
+    }
+    
+    GtkWidget *apply_btn = gtk_button_new_with_label("Aplicar");
+    gtk_widget_add_css_class(apply_btn, "suggested-action");
+    gtk_box_append(GTK_BOX(part_box), apply_btn);
+    
+    WcParticipantsData *pd = g_new0(WcParticipantsData, 1);
+    pd->app_state = state;
+    pd->text_buf = part_buf;
+    pd->popover = GTK_POPOVER(part_popover);
+    g_signal_connect(apply_btn, "clicked", G_CALLBACK(on_wc_participants_apply), pd);
+    
+    gtk_popover_set_child(GTK_POPOVER(part_popover), part_box);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(participants_btn), part_popover);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), participants_btn);
     
     GtkWidget *export_btn = gtk_button_new_from_icon_name("document-save-symbolic");
     gtk_widget_set_tooltip_text(export_btn, "Exportar visualización a SVG");
