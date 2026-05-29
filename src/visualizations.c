@@ -1137,6 +1137,23 @@ static gboolean is_only_nbsp(const char *s) {
     return TRUE;
 }
 
+static char* replace_multibyte_punctuation(const char *str) {
+    if (!str) return NULL;
+    GString *res = g_string_new("");
+    const char *p = str;
+    while (*p) {
+        gunichar c = g_utf8_get_char(p);
+        if (c == 0x00BF || c == 0x00A1 || c == 0x2014 || c == 0x2013 || 
+            c == 0x00AB || c == 0x00BB || c == 0x201C || c == 0x201D) {
+            g_string_append_c(res, ' ');
+        } else {
+            g_string_append_unichar(res, c);
+        }
+        p = g_utf8_next_char(p);
+    }
+    return g_string_free(res, FALSE);
+}
+
 static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     // Keep existing participant_names if already set, else load from file
     if (!wc->participant_names) {
@@ -1240,7 +1257,8 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                  *         a participant name and a number sequence, and skip both.
                  */
                 char *lower = g_utf8_strdown(dialog_trimmed, -1);
-                char **words_raw = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>[]{}—–", -1);
+                char *clean_lower = replace_multibyte_punctuation(lower);
+                char **words_raw = g_strsplit_set(clean_lower, " \n\t.,;:!?()\"'<>[]{}", -1);
 
                 // Build clean list of non-empty tokens
                 GPtrArray *clean_tokens = g_ptr_array_new_with_free_func(g_free);
@@ -1251,6 +1269,7 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                     }
                 }
                 g_strfreev(words_raw);
+                g_free(clean_lower);
                 g_free(lower);
 
                 // Traverse and filter
