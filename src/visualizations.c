@@ -1035,26 +1035,13 @@ static gboolean wc_is_participant_name(WordCloudState *wc, const char *word) {
     return FALSE;
 }
 
-static gboolean wc_is_timestamp_line(const char *p) {
-    if (*p != '[') return FALSE;
-    p++;
-    int colons = 0;
-    int digits = 0;
-    while (*p) {
-        if (*p >= '0' && *p <= '9') {
-            digits++;
-        } else if (*p == ':') {
-            colons++;
-        } else if (*p == ']') {
-            p++;
-            while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-            return (*p == '\0' && colons >= 1 && digits >= 4);
-        } else {
-            return FALSE;
-        }
-        p++;
+static gboolean wc_is_pure_digit(const char *s) {
+    if (!s || *s == '\0') return FALSE;
+    while (*s) {
+        if (*s < '0' || *s > '9') return FALSE;
+        s++;
     }
-    return FALSE;
+    return TRUE;
 }
 
 static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
@@ -1066,6 +1053,9 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     wc->max_freq = 1;
     wc->zoom = wc->zoom > 0 ? wc->zoom : 1.0;
 
+    GRegex *timestamp_rx = g_regex_new("^\\s*\\[[\\d:]+\\]\\s*$", G_REGEX_DEFAULT, 0, NULL);
+    GRegex *speaker_rx = g_regex_new("^\\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\\s*)+\\d*\\s*:\\s*$", G_REGEX_DEFAULT, 0, NULL);
+
     GHashTable *counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     sqlite3_stmt *stmt = db_documents_get_all_contents(app_state->current_project_id);
     if(stmt) {
@@ -1075,22 +1065,24 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
 
             char *text = strip_html(html);
 
-            // TODO: This parsing logic is tailored specifically for the Google Pinpoint transcription
-            // format (e.g., "Speaker: text" or "Speaker N: text"). In the future, we should implement
-            // a more robust/generic solution, such as supporting standard transcript formats (WebVTT, SRT, JSON)
-            // or allowing customizable regex/delimiters for speaker labels.
-            // Process line by line.
-            // If a line starts with a participant name (optionally followed by a number
-            // and a colon), skip that name token and count only the dialog content.
+            // Three-pass approach:
+            // (1) skip timestamp lines,
+            // (2) skip speaker-label lines / strip speaker-label prefix,
+            // (3) post-tokenization pseudonym+number filter.
             char **lines = g_strsplit(text, "\n", -1);
             for (int li = 0; lines[li] != NULL; li++) {
                 const char *line = lines[li];
                 const char *p = line;
                 while (*p == ' ' || *p == '\t') p++;
-                if (wc_is_timestamp_line(p)) continue;
 
-                // Try to match speaker label: "Name" or "Name N" followed by ":"
-                const char *content_start = line;
+                // Pass 1: Skip timestamp lines
+                if (timestamp_rx && g_regex_match(timestamp_rx, line, 0, NULL)) continue;
+
+                // Pass 2: Skip speaker-label lines
+                if (speaker_rx && g_regex_match(speaker_rx, line, 0, NULL)) continue;
+
+                // Strip speaker-label prefix if it starts the dialogue line
+                const char *content_start = p;
                 if (wc->num_participants > 0) {
                     for (int ni = 0; wc->participant_names[ni] != NULL; ni++) {
                         char *name = g_strstrip(wc->participant_names[ni]);
@@ -1098,12 +1090,9 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                         gsize nlen = strlen(name);
                         if (g_ascii_strncasecmp(p, name, nlen) == 0) {
                             const char *after = p + nlen;
-                            // Optional " N"
-                            if (*after == ' ') {
-                                const char *q = after + 1;
-                                while (*q >= '0' && *q <= '9') q++;
-                                if (*q == ':') after = q;
-                            }
+                            while (*after == ' ' || *after == '\t') after++;
+                            while (*after >= '0' && *after <= '9') after++;
+                            while (*after == ' ' || *after == '\t') after++;
                             if (*after == ':') {
                                 content_start = after + 1;
                                 while (*content_start == ' ' || *content_start == '\t') content_start++;
@@ -1113,34 +1102,47 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
                     }
                 }
 
+                if (*content_start == '\0') continue;
+
+                // Pass 3: Post-tokenization lookahead filter
                 char *lower = g_utf8_strdown(content_start, -1);
-                char **words = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>[]{}—–", -1);
-                for(int i = 0; words[i] != NULL; i++) {
-                    char *w = g_strstrip(words[i]);
-                    if(strlen(w) > 1) {
-                        // Skip "Name N" patterns anywhere in dialog
-                        // e.g. "como dijo Estudiante 2 ayer" → skip "estudiante" AND "2"
-                        // But "Un estudiante hizo esto" → counts normally (no number follows)
-                        gboolean skip = FALSE;
-                        if (words[i+1] != NULL) {
-                            char *next = g_strstrip(words[i+1]);
-                            gboolean next_is_num = (strlen(next) > 0);
-                            for (const char *c = next; *c && next_is_num; c++)
-                                if (*c < '0' || *c > '9') next_is_num = FALSE;
-                            if (next_is_num && wc_is_participant_name(wc, w)) {
-                                i++; // skip the number token too
-                                skip = TRUE;
-                            }
+                char **words_raw = g_strsplit_set(lower, " \n\t.,;:!?()\"'<>[]{}—–", -1);
+
+                // Build clean list of non-empty tokens
+                GPtrArray *clean_tokens = g_ptr_array_new_with_free_func(g_free);
+                for (int i = 0; words_raw[i] != NULL; i++) {
+                    char *w = g_strstrip(words_raw[i]);
+                    if (w[0] != '\0') {
+                        g_ptr_array_add(clean_tokens, g_strdup(w));
+                    }
+                }
+                g_strfreev(words_raw);
+                g_free(lower);
+
+                // Traverse and filter
+                int i = 0;
+                while (i < clean_tokens->len) {
+                    char *w = g_ptr_array_index(clean_tokens, i);
+                    gboolean skip = FALSE;
+
+                    if (i + 1 < clean_tokens->len) {
+                        char *next = g_ptr_array_index(clean_tokens, i + 1);
+                        if (wc_is_pure_digit(next) && wc_is_participant_name(wc, w)) {
+                            i += 2; // skip both
+                            skip = TRUE;
                         }
-                        if (!skip) {
+                    }
+
+                    if (!skip) {
+                        if (strlen(w) > 1) {
                             gpointer val = g_hash_table_lookup(counts, w);
                             int cnt = val ? GPOINTER_TO_INT(val) : 0;
                             g_hash_table_replace(counts, g_strdup(w), GINT_TO_POINTER(cnt + 1));
                         }
+                        i++;
                     }
                 }
-                g_strfreev(words);
-                g_free(lower);
+                g_ptr_array_free(clean_tokens, TRUE);
             }
             g_strfreev(lines);
             g_free(text);
@@ -1160,6 +1162,8 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     if (wc->words) {
         wc->max_freq = ((WordFreq*)wc->words->data)->freq;
     }
+    if (timestamp_rx) g_regex_unref(timestamp_rx);
+    if (speaker_rx) g_regex_unref(speaker_rx);
 }
 
 static void free_wordcloud_data(WordCloudState *wc) {
