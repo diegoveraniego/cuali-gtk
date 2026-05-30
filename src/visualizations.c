@@ -933,6 +933,25 @@ GtkWidget* create_heatmap_view(CualiAppState *state) {
 // --- Tag-Doc Matrix Logic ---
 // Very similar to Heatmap, just different query
 
+typedef enum {
+    ROW_TYPE_GROUP_HEADER,
+    ROW_TYPE_TAG
+} RowType;
+
+typedef struct {
+    RowType type;
+    int group_index;
+    int tag_index;
+    double y;
+    double height;
+} VisibleRow;
+
+typedef struct {
+    char *name;          // Allocated group name (first segment)
+    GArray *tag_indices;  // Array of ints (indices into td->tag_ids, etc.)
+    gboolean collapsed;
+} MatGroup;
+
 typedef struct {
     char **tag_names;
     char **doc_names;
@@ -941,11 +960,219 @@ typedef struct {
     int num_tags;
     int num_docs;
     int **matrix;
+    
+    // REDESIGNED MATRIX STATE
+    GList *groups;        // List of MatGroup*
+    gboolean show_top_15;  // View toggle: FALSE for "Todos", TRUE for "Top 15"
+    
+    // Hover states
+    int hover_row;        // -1 if none, or row index in visible_rows, or -2 for doc header
+    int hover_col;        // -1 if none, or column index in doc list
+    double mouse_x;
+    double mouse_y;
+    
+    GArray *visible_rows; // Array of VisibleRow
 } TagDocState;
+
+static char* abbreviate_document_name(const char *name) {
+    if (!name || strlen(name) == 0) return g_strdup("?");
+    GString *abbr = g_string_new("");
+    gboolean new_word = TRUE;
+    for (const char *p = name; *p != '\0'; p = g_utf8_next_char(p)) {
+        gunichar c = g_utf8_get_char(p);
+        if (g_unichar_isspace(c) || g_unichar_ispunct(c)) {
+            new_word = TRUE;
+        } else if (new_word) {
+            if (g_unichar_isalnum(c)) {
+                gchar buf[6];
+                int len = g_unichar_to_utf8(g_unichar_toupper(c), buf);
+                buf[len] = '\0';
+                g_string_append(abbr, buf);
+                new_word = FALSE;
+            }
+        }
+    }
+    if (abbr->len == 0) {
+        g_string_free(abbr, TRUE);
+        if (g_utf8_strlen(name, -1) > 3) {
+            return g_utf8_substring(name, 0, 3);
+        } else {
+            return g_strdup(name);
+        }
+    }
+    char *res = g_string_free(abbr, FALSE);
+    return res;
+}
+
+static void get_heatmap_color(int val, GdkRGBA *bg, GdkRGBA *fg) {
+    if (val == 1) {
+        gdk_rgba_parse(bg, "#9FE1CB");
+        gdk_rgba_parse(fg, "#085041");
+    } else if (val >= 2 && val <= 3) {
+        gdk_rgba_parse(bg, "#5DCAA5");
+        gdk_rgba_parse(fg, "#085041");
+    } else if (val >= 4 && val <= 6) {
+        gdk_rgba_parse(bg, "#1D9E75");
+        gdk_rgba_parse(fg, "#E1F5EE");
+    } else if (val >= 7 && val <= 9) {
+        gdk_rgba_parse(bg, "#0F6E56");
+        gdk_rgba_parse(fg, "#E1F5EE");
+    } else if (val >= 10) {
+        gdk_rgba_parse(bg, "#085041");
+        gdk_rgba_parse(fg, "#9FE1CB");
+    } else {
+        // Empty
+        bg->red = bg->green = bg->blue = bg->alpha = 0.0;
+        gdk_rgba_parse(fg, "#555555");
+    }
+}
+
+static void build_matrix_groups(TagDocState *td) {
+    if (td->groups) {
+        for (GList *l = td->groups; l != NULL; l = l->next) {
+            MatGroup *g = l->data;
+            g_free(g->name);
+            g_array_free(g->tag_indices, TRUE);
+            g_free(g);
+        }
+        g_list_free(td->groups);
+        td->groups = NULL;
+    }
+    
+    for (int i = 0; i < td->num_tags; i++) {
+        const char *path = td->tag_names[i];
+        const char *first_slash = strchr(path, '/');
+        char *group_name = NULL;
+        if (first_slash) {
+            group_name = g_strndup(path, first_slash - path);
+        } else {
+            group_name = g_strdup(path);
+        }
+        
+        MatGroup *target_group = NULL;
+        for (GList *l = td->groups; l != NULL; l = l->next) {
+            MatGroup *g = l->data;
+            if (g_strcmp0(g->name, group_name) == 0) {
+                target_group = g;
+                break;
+            }
+        }
+        
+        if (!target_group) {
+            target_group = g_new0(MatGroup, 1);
+            target_group->name = g_strdup(group_name);
+            target_group->tag_indices = g_array_new(FALSE, FALSE, sizeof(int));
+            target_group->collapsed = FALSE;
+            td->groups = g_list_append(td->groups, target_group);
+        }
+        
+        g_array_append_val(target_group->tag_indices, i);
+        g_free(group_name);
+    }
+}
+
+static int get_tag_total(TagDocState *td, int tag_idx) {
+    int total = 0;
+    for (int j = 0; j < td->num_docs; j++) {
+        total += td->matrix[tag_idx][j];
+    }
+    return total;
+}
+
+static TagDocState *g_qsort_td = NULL;
+static int compare_tag_totals(const void *a, const void *b) {
+    int idx_a = *(const int *)a;
+    int idx_b = *(const int *)b;
+    int total_a = get_tag_total(g_qsort_td, idx_a);
+    int total_b = get_tag_total(g_qsort_td, idx_b);
+    if (total_a != total_b) {
+        return total_b - total_a; // Descending
+    }
+    return g_strcmp0(g_qsort_td->tag_names[idx_a], g_qsort_td->tag_names[idx_b]);
+}
+
+static void rebuild_visible_rows(TagDocState *td) {
+    if (!td->visible_rows) {
+        td->visible_rows = g_array_new(FALSE, FALSE, sizeof(VisibleRow));
+    } else {
+        g_array_set_size(td->visible_rows, 0);
+    }
+    
+    if (td->show_top_15) {
+        int *sorted_indices = g_new(int, td->num_tags);
+        for (int i = 0; i < td->num_tags; i++) sorted_indices[i] = i;
+        
+        g_qsort_td = td;
+        qsort(sorted_indices, td->num_tags, sizeof(int), compare_tag_totals);
+        
+        int count = MIN(15, td->num_tags);
+        double current_y = 50.0;
+        for (int i = 0; i < count; i++) {
+            VisibleRow r;
+            r.type = ROW_TYPE_TAG;
+            r.group_index = -1;
+            r.tag_index = sorted_indices[i];
+            r.y = current_y;
+            r.height = 30.0;
+            g_array_append_val(td->visible_rows, r);
+            current_y += 30.0;
+        }
+        g_free(sorted_indices);
+    } else {
+        double current_y = 50.0;
+        int group_idx = 0;
+        for (GList *l = td->groups; l != NULL; l = l->next) {
+            MatGroup *g = l->data;
+            
+            VisibleRow hr;
+            hr.type = ROW_TYPE_GROUP_HEADER;
+            hr.group_index = group_idx;
+            hr.tag_index = -1;
+            hr.y = current_y;
+            hr.height = 30.0;
+            g_array_append_val(td->visible_rows, hr);
+            current_y += 30.0;
+            
+            if (!g->collapsed) {
+                for (guint i = 0; i < g->tag_indices->len; i++) {
+                    int tag_idx = g_array_index(g->tag_indices, int, i);
+                    VisibleRow tr;
+                    tr.type = ROW_TYPE_TAG;
+                    tr.group_index = group_idx;
+                    tr.tag_index = tag_idx;
+                    tr.y = current_y;
+                    tr.height = 30.0;
+                    g_array_append_val(td->visible_rows, tr);
+                    current_y += 30.0;
+                }
+            }
+            group_idx++;
+        }
+    }
+}
+
+static void update_matrix_area_size(TagDocState *td) {
+    if (g_mat_area) {
+        int total_width = 220 + td->num_docs * 70;
+        int total_height = 50;
+        if (td->visible_rows) {
+            total_height += td->visible_rows->len * 30;
+        }
+        total_height += 40; // extra padding for legend/spacing
+        gtk_widget_set_size_request(g_mat_area, total_width, total_height);
+    }
+}
 
 static void load_tagdoc_data(CualiAppState *app_state, TagDocState *td) {
     td->num_tags = 0;
     td->num_docs = 0;
+    td->groups = NULL;
+    td->visible_rows = NULL;
+    td->show_top_15 = FALSE;
+    td->hover_row = -1;
+    td->hover_col = -1;
+    td->mouse_x = 0.0;
+    td->mouse_y = 0.0;
     
     // Count tags
     sqlite3_stmt *tstmt = db_tags_get_all(app_state->current_project_id);
@@ -1005,6 +1232,9 @@ static void load_tagdoc_data(CualiAppState *app_state, TagDocState *td) {
         }
         sqlite3_finalize(mstmt);
     }
+    
+    build_matrix_groups(td);
+    rebuild_visible_rows(td);
 }
 
 static void free_tagdoc_data(TagDocState *td) {
@@ -1022,139 +1252,481 @@ static void free_tagdoc_data(TagDocState *td) {
     td->doc_names = NULL; td->doc_ids = NULL;
     td->matrix = NULL;
     td->num_tags = 0; td->num_docs = 0;
+    
+    if (td->groups) {
+        for (GList *l = td->groups; l != NULL; l = l->next) {
+            MatGroup *g = l->data;
+            g_free(g->name);
+            g_array_free(g->tag_indices, TRUE);
+            g_free(g);
+        }
+        g_list_free(td->groups);
+        td->groups = NULL;
+    }
+    
+    if (td->visible_rows) {
+        g_array_free(td->visible_rows, TRUE);
+        td->visible_rows = NULL;
+    }
 }
 
 static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    TagDocState *td = (TagDocState *)user_data;
-    
-    int cell_width = 45;
-    int cell_height = 30;
-    int gap = 2;
-    
-    int max_val = 1;
-    for(int i = 0; i < td->num_tags; i++) {
-        for(int j = 0; j < td->num_docs; j++) {
-            if(td->matrix[i][j] > max_val) max_val = td->matrix[i][j];
-        }
-    }
-    
-    // Calculate max text width for tags
-    int max_tag_w = 0;
-    for(int i = 0; i < td->num_tags; i++) {
-        PangoLayout *layout = pango_cairo_create_layout(cr);
-        pango_layout_set_text(layout, td->tag_names[i], -1);
-        PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 10");
-        pango_layout_set_font_description(layout, desc);
-        int tw, th;
-        pango_layout_get_pixel_size(layout, &tw, &th);
-        if (tw > max_tag_w) max_tag_w = tw;
-        pango_font_description_free(desc);
-        g_object_unref(layout);
-    }
-    
-    // Calculate max text width for docs (angled)
-    int max_doc_w = 0;
-    for(int j = 0; j < td->num_docs; j++) {
-        PangoLayout *layout = pango_cairo_create_layout(cr);
-        pango_layout_set_text(layout, td->doc_names[j], -1);
-        PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 10");
-        pango_layout_set_font_description(layout, desc);
-        int tw, th;
-        pango_layout_get_pixel_size(layout, &tw, &th);
-        if (tw > max_doc_w) max_doc_w = tw;
-        pango_font_description_free(desc);
-        g_object_unref(layout);
-    }
-    
-    // Angled at 45 degrees, vertical space needed is sin(45) * width
-    int doc_header_height = (int)(max_doc_w * 0.707) + 40;
-    
-    int base_offset_x = max_tag_w + 40;
-    int total_matrix_w = td->num_docs * (cell_width + gap);
-    int total_viz_w = base_offset_x + total_matrix_w;
-    
-    int offset_x = base_offset_x;
-    int offset_y = doc_header_height;
-    
-    // Centering calculation for the whole block
-    if (total_viz_w < width) {
-        offset_x += (width - total_viz_w) / 2;
-    }
+    TagDocState *state = (TagDocState *)user_data;
     
     GdkRGBA fg_color;
     gtk_style_context_lookup_color(gtk_widget_get_style_context(GTK_WIDGET(area)), "theme_fg_color", &fg_color);
     
-    for(int i = 0; i < td->num_tags; i++) {
-        PangoLayout *layout = pango_cairo_create_layout(cr);
-        pango_layout_set_text(layout, td->tag_names[i], -1);
-        PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 10");
-        pango_layout_set_font_description(layout, desc);
-        pango_font_description_free(desc);
+    // Draw column headers
+    for (int col = 0; col < state->num_docs; col++) {
+        double col_start_x = 220.0 + col * 70.0;
         
-        int tw, th;
-        pango_layout_get_pixel_size(layout, &tw, &th);
-        cairo_move_to(cr, offset_x - 20 - tw, offset_y + i * (cell_height + gap) + (cell_height - th)/2.0);
-        cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
-        pango_cairo_show_layout(cr, layout);
-        g_object_unref(layout);
+        char *abbr = abbreviate_document_name(state->doc_names[col]);
         
-        for(int j = 0; j < td->num_docs; j++) {
-            if (i == 0) {
-                cairo_save(cr);
-                // Position for angled doc labels: center of cell, slightly above matrix
-                cairo_translate(cr, offset_x + j * (cell_width + gap) + cell_width/2.0, offset_y - 10);
-                cairo_rotate(cr, -G_PI / 4.0);
-                
-                PangoLayout *hl = pango_cairo_create_layout(cr);
-                pango_layout_set_text(hl, td->doc_names[j], -1);
-                PangoFontDescription *hdesc = pango_font_description_from_string("Inter, Cantarell 10");
-                pango_layout_set_font_description(hl, hdesc);
-                pango_font_description_free(hdesc);
-                
-                int dtw, dth;
-                pango_layout_get_pixel_size(hl, &dtw, &dth);
-                // Move text so its end (right side) is near the anchor point if rotating, 
-                // but here we just want it to extend upwards.
-                cairo_move_to(cr, 0, -5); 
-                cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
-                pango_cairo_show_layout(cr, hl);
-                g_object_unref(hl);
-                cairo_restore(cr);
+        PangoLayout *al = pango_cairo_create_layout(cr);
+        pango_layout_set_text(al, abbr, -1);
+        PangoFontDescription *adesc = pango_font_description_from_string("Inter, Cantarell Bold 11");
+        pango_layout_set_font_description(al, adesc);
+        pango_font_description_free(adesc);
+        
+        int aw, ah;
+        pango_layout_get_pixel_size(al, &aw, &ah);
+        
+        PangoLayout *fl = pango_cairo_create_layout(cr);
+        char *truncated_doc = NULL;
+        if (g_utf8_strlen(state->doc_names[col], -1) > 10) {
+            gchar *sub = g_utf8_substring(state->doc_names[col], 0, 8);
+            truncated_doc = g_strconcat(sub, "..", NULL);
+            g_free(sub);
+        } else {
+            truncated_doc = g_strdup(state->doc_names[col]);
+        }
+        pango_layout_set_text(fl, truncated_doc, -1);
+        PangoFontDescription *fdesc = pango_font_description_from_string("Inter, Cantarell 9");
+        pango_layout_set_font_description(fl, fdesc);
+        pango_font_description_free(fdesc);
+        
+        int fw, fh;
+        pango_layout_get_pixel_size(fl, &fw, &fh);
+        
+        cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 1.0);
+        cairo_move_to(cr, col_start_x + (70.0 - aw)/2.0, 10.0);
+        pango_cairo_show_layout(cr, al);
+        
+        cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.5);
+        cairo_move_to(cr, col_start_x + (70.0 - fw)/2.0, 12.0 + ah);
+        pango_cairo_show_layout(cr, fl);
+        
+        g_object_unref(al);
+        g_object_unref(fl);
+        g_free(abbr);
+        g_free(truncated_doc);
+    }
+    
+    // Draw separator under column headers
+    cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.2);
+    cairo_set_line_width(cr, 1.0);
+    cairo_move_to(cr, 0.0, 50.0);
+    cairo_line_to(cr, 220.0 + state->num_docs * 70.0, 50.0);
+    cairo_stroke(cr);
+    
+    // Draw rows
+    if (state->visible_rows) {
+        for (guint i = 0; i < state->visible_rows->len; i++) {
+            VisibleRow *vr = &g_array_index(state->visible_rows, VisibleRow, i);
+            
+            // Highlight hovered row background slightly
+            if (state->hover_row == (int)i) {
+                cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.05);
+                cairo_rectangle(cr, 0.0, vr->y, 220.0 + state->num_docs * 70.0, vr->height);
+                cairo_fill(cr);
             }
             
-            int val = td->matrix[i][j];
-            double rx = offset_x + j * (cell_width + gap);
-            double ry = offset_y + i * (cell_height + gap);
-            
-            if (val > 0) {
-                double intensity = 0.2 + 0.8 * ((double)val / max_val);
-                cairo_set_source_rgba(cr, 0.2, 0.6, 0.4, intensity); // Adwaita-like green
-            } else {
-                cairo_set_source_rgba(cr, 0.5, 0.5, 0.5, 0.1); // Subtle empty cell
-            }
-            rounded_rect(cr, rx, ry, cell_width, cell_height, 4);
-            cairo_fill(cr);
-            
-            if (val > 0) {
-                char buf[32];
-                snprintf(buf, sizeof(buf), "%d", val);
-                PangoLayout *vl = pango_cairo_create_layout(cr);
-                pango_layout_set_text(vl, buf, -1);
-                PangoFontDescription *vdesc = pango_font_description_from_string("Inter, Cantarell Bold 10");
-                pango_layout_set_font_description(vl, vdesc);
-                pango_font_description_free(vdesc);
+            if (vr->type == ROW_TYPE_GROUP_HEADER) {
+                MatGroup *g = g_list_nth_data(state->groups, vr->group_index);
+                if (g) {
+                    if (i > 0) {
+                        cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.1);
+                        cairo_set_line_width(cr, 1.0);
+                        cairo_move_to(cr, 10.0, vr->y);
+                        cairo_line_to(cr, 220.0 + state->num_docs * 70.0 - 10.0, vr->y);
+                        cairo_stroke(cr);
+                    }
+                    
+                    cairo_save(cr);
+                    cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.5);
+                    cairo_translate(cr, 10.0, vr->y + (30.0 - 8.0) / 2.0);
+                    if (g->collapsed) {
+                        cairo_move_to(cr, 0, 0);
+                        cairo_line_to(cr, 6, 4);
+                        cairo_line_to(cr, 0, 8);
+                        cairo_close_path(cr);
+                        cairo_fill(cr);
+                    } else {
+                        cairo_move_to(cr, 0, 2);
+                        cairo_line_to(cr, 8, 2);
+                        cairo_line_to(cr, 4, 6);
+                        cairo_close_path(cr);
+                        cairo_fill(cr);
+                    }
+                    cairo_restore(cr);
+                    
+                    char *upper_name = g_utf8_strup(g->name, -1);
+                    PangoLayout *layout = pango_cairo_create_layout(cr);
+                    pango_layout_set_text(layout, upper_name, -1);
+                    PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell Bold 9");
+                    pango_layout_set_font_description(layout, desc);
+                    pango_font_description_free(desc);
+                    
+                    int tw, th;
+                    pango_layout_get_pixel_size(layout, &tw, &th);
+                    
+                    cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.4);
+                    cairo_move_to(cr, 24.0, vr->y + (30.0 - th) / 2.0);
+                    pango_cairo_show_layout(cr, layout);
+                    
+                    g_object_unref(layout);
+                    g_free(upper_name);
+                }
+            } else if (vr->type == ROW_TYPE_TAG) {
+                int tag_idx = vr->tag_index;
+                const char *full_path = state->tag_names[tag_idx];
                 
-                int vw, vh;
-                pango_layout_get_pixel_size(vl, &vw, &vh);
+                char *display_name = NULL;
+                int depth = 1;
                 
-                if (val > max_val * 0.5) cairo_set_source_rgb(cr, 1, 1, 1);
-                else cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
+                if (state->show_top_15) {
+                    display_name = g_strdup(full_path);
+                    depth = 1;
+                } else {
+                    char **parts = g_strsplit(full_path, "/", -1);
+                    guint num_parts = g_strv_length(parts);
+                    if (num_parts == 1) {
+                        display_name = g_strdup(parts[0]);
+                        depth = 1;
+                    } else if (num_parts == 2) {
+                        display_name = g_strdup(parts[1]);
+                        depth = 1;
+                    } else {
+                        display_name = g_strdup(parts[num_parts - 1]);
+                        depth = 2;
+                    }
+                    g_strfreev(parts);
+                }
                 
-                cairo_move_to(cr, rx + (cell_width - vw)/2.0, ry + (cell_height - vh)/2.0);
-                pango_cairo_show_layout(cr, vl);
-                g_object_unref(vl);
+                char *label_text = NULL;
+                if (depth == 2) {
+                    label_text = g_strconcat("└ ", display_name, NULL);
+                } else {
+                    label_text = g_strdup(display_name);
+                }
+                g_free(display_name);
+                
+                int total_count = get_tag_total(state, tag_idx);
+                char *count_suffix = g_strdup_printf(" (%d)", total_count);
+                char *full_label = g_strconcat(label_text, count_suffix, NULL);
+                g_free(count_suffix);
+                g_free(label_text);
+                
+                char *truncated_label = NULL;
+                if (g_utf8_strlen(full_label, -1) > 28) {
+                    gchar *sub = g_utf8_substring(full_label, 0, 25);
+                    truncated_label = g_strconcat(sub, "...", NULL);
+                    g_free(sub);
+                } else {
+                    truncated_label = g_strdup(full_label);
+                }
+                g_free(full_label);
+                
+                PangoLayout *layout = pango_cairo_create_layout(cr);
+                pango_layout_set_text(layout, truncated_label, -1);
+                PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 10");
+                pango_layout_set_font_description(layout, desc);
+                pango_font_description_free(desc);
+                
+                int tw, th;
+                pango_layout_get_pixel_size(layout, &tw, &th);
+                
+                double indent = 10.0;
+                if (depth == 2) {
+                    indent += 12.0;
+                    cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.7);
+                } else {
+                    cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 1.0);
+                }
+                
+                cairo_move_to(cr, indent, vr->y + (30.0 - th) / 2.0);
+                pango_cairo_show_layout(cr, layout);
+                g_object_unref(layout);
+                g_free(truncated_label);
+                
+                // Cells
+                for (int col = 0; col < state->num_docs; col++) {
+                    int val = state->matrix[tag_idx][col];
+                    double cell_x = 220.0 + col * 70.0 + (70.0 - 52.0) / 2.0;
+                    double cell_y = vr->y + (30.0 - 24.0) / 2.0;
+                    
+                    gboolean cell_hovered = (state->hover_row == (int)i && state->hover_col == col);
+                    
+                    GdkRGBA sbg, sfg;
+                    get_heatmap_color(val, &sbg, &sfg);
+                    
+                    if (val > 0) {
+                        cairo_set_source_rgba(cr, sbg.red, sbg.green, sbg.blue, 1.0);
+                        rounded_rect(cr, cell_x, cell_y, 52.0, 24.0, 4.0);
+                        cairo_fill(cr);
+                        
+                        if (cell_hovered) {
+                            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.5);
+                            cairo_set_line_width(cr, 1.5);
+                            rounded_rect(cr, cell_x, cell_y, 52.0, 24.0, 4.0);
+                            cairo_stroke(cr);
+                        }
+                        
+                        char buf[16];
+                        snprintf(buf, sizeof(buf), "%d", val);
+                        PangoLayout *vl = pango_cairo_create_layout(cr);
+                        pango_layout_set_text(vl, buf, -1);
+                        PangoFontDescription *vdesc = pango_font_description_from_string("Inter, Cantarell Bold 10");
+                        pango_layout_set_font_description(vl, vdesc);
+                        pango_font_description_free(vdesc);
+                        
+                        int vw, vh;
+                        pango_layout_get_pixel_size(vl, &vw, &vh);
+                        
+                        cairo_set_source_rgb(cr, sfg.red, sfg.green, sfg.blue);
+                        cairo_move_to(cr, cell_x + (52.0 - vw)/2.0, cell_y + (24.0 - vh)/2.0);
+                        pango_cairo_show_layout(cr, vl);
+                        g_object_unref(vl);
+                    } else {
+                        PangoLayout *vl = pango_cairo_create_layout(cr);
+                        pango_layout_set_text(vl, "·", -1);
+                        PangoFontDescription *vdesc = pango_font_description_from_string("Inter, Cantarell 12");
+                        pango_layout_set_font_description(vl, vdesc);
+                        pango_font_description_free(vdesc);
+                        
+                        int vw, vh;
+                        pango_layout_get_pixel_size(vl, &vw, &vh);
+                        
+                        cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.3);
+                        cairo_move_to(cr, cell_x + (52.0 - vw)/2.0, cell_y + (24.0 - vh)/2.0);
+                        pango_cairo_show_layout(cr, vl);
+                        g_object_unref(vl);
+                    }
+                }
             }
         }
+    }
+    
+    // Draw legend
+    double legend_y = height - 30.0;
+    PangoLayout *ll = pango_cairo_create_layout(cr);
+    pango_layout_set_text(ll, "Frecuencia:", -1);
+    PangoFontDescription *ldesc = pango_font_description_from_string("Inter, Cantarell 10");
+    pango_layout_set_font_description(ll, ldesc);
+    pango_font_description_free(ldesc);
+    
+    int ltw, lth;
+    pango_layout_get_pixel_size(ll, &ltw, &lth);
+    
+    cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.6);
+    cairo_move_to(cr, 20.0, legend_y + (16.0 - lth)/2.0);
+    pango_cairo_show_layout(cr, ll);
+    g_object_unref(ll);
+    
+    struct {
+        int val;
+        const char *label;
+    } swatches[] = {
+        {1, "1"},
+        {2, "2-3"},
+        {4, "4-6"},
+        {7, "7-9"},
+        {10, "10+"}
+    };
+    
+    double sx = 20.0 + ltw + 15.0;
+    for (int i = 0; i < 5; i++) {
+        GdkRGBA sbg, sfg;
+        get_heatmap_color(swatches[i].val, &sbg, &sfg);
+        
+        cairo_set_source_rgb(cr, sbg.red, sbg.green, sbg.blue);
+        rounded_rect(cr, sx, legend_y, 16.0, 16.0, 3.0);
+        cairo_fill(cr);
+        
+        PangoLayout *sl = pango_cairo_create_layout(cr);
+        pango_layout_set_text(sl, swatches[i].label, -1);
+        PangoFontDescription *sdesc = pango_font_description_from_string("Inter, Cantarell 10");
+        pango_layout_set_font_description(sl, sdesc);
+        pango_font_description_free(sdesc);
+        
+        int stw, sth;
+        pango_layout_get_pixel_size(sl, &stw, &sth);
+        
+        cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.8);
+        cairo_move_to(cr, sx + 20.0, legend_y + (16.0 - sth)/2.0);
+        pango_cairo_show_layout(cr, sl);
+        g_object_unref(sl);
+        
+        sx += 20.0 + stw + 15.0;
+    }
+    
+    // Draw tooltips
+    if (cairo_surface_get_type(cairo_get_target(cr)) != CAIRO_SURFACE_TYPE_SVG) {
+        char *tooltip_text = NULL;
+        if (state->hover_row == -2 && state->hover_col >= 0 && state->hover_col < state->num_docs) {
+            tooltip_text = g_strdup(state->doc_names[state->hover_col]);
+        } else if (state->hover_row >= 0 && state->hover_row < (int)state->visible_rows->len) {
+            VisibleRow *vr = &g_array_index(state->visible_rows, VisibleRow, state->hover_row);
+            if (vr->type == ROW_TYPE_TAG) {
+                if (state->mouse_x < 220.0) {
+                    tooltip_text = g_strdup(state->tag_names[vr->tag_index]);
+                } else if (state->hover_col >= 0 && state->hover_col < state->num_docs) {
+                    int val = state->matrix[vr->tag_index][state->hover_col];
+                    const char *doc_name = state->doc_names[state->hover_col];
+                    const char *tag_path = state->tag_names[vr->tag_index];
+                    tooltip_text = g_strdup_printf("%s — %s: %d %s", tag_path, doc_name, val, val == 1 ? "cita" : "citas");
+                }
+            }
+        }
+        
+        if (tooltip_text) {
+            PangoLayout *layout = pango_cairo_create_layout(cr);
+            pango_layout_set_text(layout, tooltip_text, -1);
+            PangoFontDescription *desc = pango_font_description_from_string("Inter, Cantarell 11");
+            pango_layout_set_font_description(layout, desc);
+            pango_font_description_free(desc);
+            
+            int text_w, text_h;
+            pango_layout_get_pixel_size(layout, &text_w, &text_h);
+            
+            double padding_x = 10.0;
+            double padding_y = 8.0;
+            double box_w = text_w + padding_x * 2.0;
+            double box_h = text_h + padding_y * 2.0;
+            
+            double tx = state->mouse_x + 15.0;
+            double ty = state->mouse_y + 15.0;
+            
+            if (tx + box_w > width) {
+                tx = state->mouse_x - box_w - 5.0;
+            }
+            if (ty + box_h > height) {
+                ty = state->mouse_y - box_h - 5.0;
+            }
+            if (tx < 0.0) tx = 5.0;
+            if (ty < 0.0) ty = 5.0;
+            
+            cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.3);
+            rounded_rect(cr, tx + 2, ty + 2, box_w, box_h, 6.0);
+            cairo_fill(cr);
+            
+            cairo_set_source_rgba(cr, 0.15, 0.15, 0.15, 0.95);
+            rounded_rect(cr, tx, ty, box_w, box_h, 6.0);
+            cairo_fill_preserve(cr);
+            
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.2);
+            cairo_set_line_width(cr, 1.0);
+            cairo_stroke(cr);
+            
+            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            cairo_move_to(cr, tx + padding_x, ty + padding_y);
+            pango_cairo_show_layout(cr, layout);
+            
+            g_object_unref(layout);
+            g_free(tooltip_text);
+        }
+    }
+}
+
+static void on_matrix_toggle_todos(GtkToggleButton *btn, gpointer user_data) {
+    TagDocState *td = (TagDocState *)user_data;
+    if (gtk_toggle_button_get_active(btn)) {
+        td->show_top_15 = FALSE;
+        rebuild_visible_rows(td);
+        update_matrix_area_size(td);
+        gtk_widget_queue_draw(g_mat_area);
+    }
+}
+
+static void on_matrix_toggle_top15(GtkToggleButton *btn, gpointer user_data) {
+    TagDocState *td = (TagDocState *)user_data;
+    if (gtk_toggle_button_get_active(btn)) {
+        td->show_top_15 = TRUE;
+        rebuild_visible_rows(td);
+        update_matrix_area_size(td);
+        gtk_widget_queue_draw(g_mat_area);
+    }
+}
+
+static void on_mat_click(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data) {
+    TagDocState *td = (TagDocState *)user_data;
+    
+    if (td->show_top_15) return;
+    
+    if (td->visible_rows) {
+        for (guint i = 0; i < td->visible_rows->len; i++) {
+            VisibleRow *r = &g_array_index(td->visible_rows, VisibleRow, i);
+            if (r->type == ROW_TYPE_GROUP_HEADER) {
+                if (y >= r->y && y < r->y + r->height) {
+                    if (x >= 0.0 && x < 220.0) {
+                        MatGroup *g = g_list_nth_data(td->groups, r->group_index);
+                        if (g) {
+                            g->collapsed = !g->collapsed;
+                            rebuild_visible_rows(td);
+                            update_matrix_area_size(td);
+                            gtk_widget_queue_draw(g_mat_area);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void on_mat_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data) {
+    TagDocState *td = (TagDocState *)user_data;
+    td->mouse_x = x;
+    td->mouse_y = y;
+    
+    int new_hover_row = -1;
+    int new_hover_col = -1;
+    
+    if (y < 50.0) {
+        new_hover_row = -2; // Header
+    } else if (td->visible_rows) {
+        for (guint i = 0; i < td->visible_rows->len; i++) {
+            VisibleRow *r = &g_array_index(td->visible_rows, VisibleRow, i);
+            if (y >= r->y && y < r->y + r->height) {
+                new_hover_row = i;
+                break;
+            }
+        }
+    }
+    
+    if (x >= 220.0) {
+        double col_x = x - 220.0;
+        int col_idx = (int)(col_x / 70.0);
+        if (col_idx >= 0 && col_idx < td->num_docs) {
+            new_hover_col = col_idx;
+        }
+    }
+    
+    if (td->hover_row != new_hover_row || td->hover_col != new_hover_col) {
+        td->hover_row = new_hover_row;
+        td->hover_col = new_hover_col;
+        gtk_widget_queue_draw(g_mat_area);
+    } else {
+        gtk_widget_queue_draw(g_mat_area);
+    }
+}
+
+static void on_mat_leave(GtkEventControllerMotion *controller, gpointer user_data) {
+    TagDocState *td = (TagDocState *)user_data;
+    if (td->hover_row != -1 || td->hover_col != -1) {
+        td->hover_row = -1;
+        td->hover_col = -1;
+        gtk_widget_queue_draw(g_mat_area);
     }
 }
 
@@ -1165,12 +1737,52 @@ GtkWidget* create_matrix_view(CualiAppState *state) {
     
     GtkWidget *area = gtk_drawing_area_new();
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw_tagdoc, td, NULL);
-    gtk_widget_set_size_request(area, 200 + td->num_docs*35, 200 + td->num_tags*25);
     g_mat_area = area;
+    
+    update_matrix_area_size(td);
     
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), area);
-    return scroll;
+    
+    // Create view toggle header
+    GtkWidget *header_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_start(header_box, 16);
+    gtk_widget_set_margin_end(header_box, 16);
+    gtk_widget_set_margin_top(header_box, 10);
+    gtk_widget_set_margin_bottom(header_box, 10);
+    
+    GtkWidget *toggle_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(toggle_box, "linked");
+    
+    GtkWidget *btn_all = gtk_toggle_button_new_with_label("Todos");
+    GtkWidget *btn_top15 = gtk_toggle_button_new_with_label("Top 15");
+    
+    gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(btn_top15), GTK_TOGGLE_BUTTON(btn_all));
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(btn_all), TRUE);
+    
+    gtk_box_append(GTK_BOX(toggle_box), btn_all);
+    gtk_box_append(GTK_BOX(toggle_box), btn_top15);
+    
+    g_signal_connect(btn_all, "toggled", G_CALLBACK(on_matrix_toggle_todos), td);
+    g_signal_connect(btn_top15, "toggled", G_CALLBACK(on_matrix_toggle_top15), td);
+    
+    gtk_box_append(GTK_BOX(header_box), toggle_box);
+    
+    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(main_box), header_box);
+    gtk_box_append(GTK_BOX(main_box), scroll);
+    
+    // Gestures for drawing area
+    GtkGesture *click = gtk_gesture_click_new();
+    g_signal_connect(click, "pressed", G_CALLBACK(on_mat_click), td);
+    gtk_widget_add_controller(area, GTK_EVENT_CONTROLLER(click));
+    
+    GtkEventController *motion = gtk_event_controller_motion_new();
+    g_signal_connect(motion, "motion", G_CALLBACK(on_mat_motion), td);
+    g_signal_connect(motion, "leave", G_CALLBACK(on_mat_leave), td);
+    gtk_widget_add_controller(area, motion);
+    
+    return main_box;
 }
 
 // --- Word Cloud Logic ---
@@ -1724,8 +2336,13 @@ static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpoi
         cairo_destroy(cr);
         cairo_surface_destroy(surface);
     } else if (g_strcmp0(viz_type, "matrix") == 0 && g_mat_state && g_mat_area) {
-        int width = 200 + ((TagDocState *)g_mat_state)->num_docs * 35;
-        int height = 200 + ((TagDocState *)g_mat_state)->num_tags * 25;
+        TagDocState *td = (TagDocState *)g_mat_state;
+        int width = 220 + td->num_docs * 70;
+        int height = 50;
+        if (td->visible_rows) {
+            height += td->visible_rows->len * 30;
+        }
+        height += 40;
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
         cairo_set_source_rgb(cr, 1, 1, 1);
@@ -2144,7 +2761,7 @@ void refresh_visualizations(CualiAppState *state) {
         free_tagdoc_data((TagDocState *)g_mat_state);
         load_tagdoc_data(state, (TagDocState *)g_mat_state);
         if (g_mat_area) {
-            gtk_widget_set_size_request(g_mat_area, 200 + ((TagDocState *)g_mat_state)->num_docs*35, 200 + ((TagDocState *)g_mat_state)->num_tags*25);
+            update_matrix_area_size((TagDocState *)g_mat_state);
             gtk_widget_queue_draw(g_mat_area);
         }
     }
