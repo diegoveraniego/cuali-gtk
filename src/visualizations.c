@@ -1270,15 +1270,28 @@ static void free_tagdoc_data(TagDocState *td) {
     }
 }
 
+static void get_matrix_layout(GtkWidget *widget, TagDocState *state, int given_width, double *label_w, double *col_w) {
+    int w = given_width > 0 ? given_width : (widget ? gtk_widget_get_width(widget) : 0);
+    double min_width = 220.0 + state->num_docs * 70.0;
+    *label_w = 220.0;
+    *col_w = 70.0;
+    if (w > min_width && state->num_docs > 0) {
+        *col_w = 70.0 + (w - min_width) / state->num_docs;
+    }
+}
+
 static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
     TagDocState *state = (TagDocState *)user_data;
+    
+    double label_w, col_w;
+    get_matrix_layout(GTK_WIDGET(area), state, width, &label_w, &col_w);
     
     GdkRGBA fg_color;
     gtk_style_context_lookup_color(gtk_widget_get_style_context(GTK_WIDGET(area)), "theme_fg_color", &fg_color);
     
     // Draw column headers
     for (int col = 0; col < state->num_docs; col++) {
-        double col_start_x = 220.0 + col * 70.0;
+        double col_start_x = label_w + col * col_w;
         
         char *abbr = abbreviate_document_name(state->doc_names[col]);
         
@@ -1292,15 +1305,9 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
         pango_layout_get_pixel_size(al, &aw, &ah);
         
         PangoLayout *fl = pango_cairo_create_layout(cr);
-        char *truncated_doc = NULL;
-        if (g_utf8_strlen(state->doc_names[col], -1) > 10) {
-            gchar *sub = g_utf8_substring(state->doc_names[col], 0, 8);
-            truncated_doc = g_strconcat(sub, "..", NULL);
-            g_free(sub);
-        } else {
-            truncated_doc = g_strdup(state->doc_names[col]);
-        }
-        pango_layout_set_text(fl, truncated_doc, -1);
+        pango_layout_set_text(fl, state->doc_names[col], -1);
+        pango_layout_set_width(fl, (col_w - 10) * PANGO_SCALE);
+        pango_layout_set_ellipsize(fl, PANGO_ELLIPSIZE_END);
         PangoFontDescription *fdesc = pango_font_description_from_string("Inter, Cantarell 9");
         pango_layout_set_font_description(fl, fdesc);
         pango_font_description_free(fdesc);
@@ -1309,24 +1316,23 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
         pango_layout_get_pixel_size(fl, &fw, &fh);
         
         cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 1.0);
-        cairo_move_to(cr, col_start_x + (70.0 - aw)/2.0, 10.0);
+        cairo_move_to(cr, col_start_x + (col_w - aw)/2.0, 10.0);
         pango_cairo_show_layout(cr, al);
         
         cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.5);
-        cairo_move_to(cr, col_start_x + (70.0 - fw)/2.0, 12.0 + ah);
+        cairo_move_to(cr, col_start_x + (col_w - fw)/2.0, 12.0 + ah);
         pango_cairo_show_layout(cr, fl);
         
         g_object_unref(al);
         g_object_unref(fl);
         g_free(abbr);
-        g_free(truncated_doc);
     }
     
     // Draw separator under column headers
     cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.2);
     cairo_set_line_width(cr, 1.0);
     cairo_move_to(cr, 0.0, 50.0);
-    cairo_line_to(cr, 220.0 + state->num_docs * 70.0, 50.0);
+    cairo_line_to(cr, label_w + state->num_docs * col_w, 50.0);
     cairo_stroke(cr);
     
     // Draw rows
@@ -1337,7 +1343,7 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
             // Highlight hovered row background slightly
             if (state->hover_row == (int)i) {
                 cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.05);
-                cairo_rectangle(cr, 0.0, vr->y, 220.0 + state->num_docs * 70.0, vr->height);
+                cairo_rectangle(cr, 0.0, vr->y, label_w + state->num_docs * col_w, vr->height);
                 cairo_fill(cr);
             }
             
@@ -1348,7 +1354,7 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
                         cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, 0.1);
                         cairo_set_line_width(cr, 1.0);
                         cairo_move_to(cr, 10.0, vr->y);
-                        cairo_line_to(cr, 220.0 + state->num_docs * 70.0 - 10.0, vr->y);
+                        cairo_line_to(cr, label_w + state->num_docs * col_w - 10.0, vr->y);
                         cairo_stroke(cr);
                     }
                     
@@ -1462,7 +1468,7 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
                 // Cells
                 for (int col = 0; col < state->num_docs; col++) {
                     int val = state->matrix[tag_idx][col];
-                    double cell_x = 220.0 + col * 70.0 + (70.0 - 52.0) / 2.0;
+                    double cell_x = label_w + col * col_w + (col_w - 52.0) / 2.0;
                     double cell_y = vr->y + (30.0 - 24.0) / 2.0;
                     
                     gboolean cell_hovered = (state->hover_row == (int)i && state->hover_col == col);
@@ -1578,7 +1584,7 @@ static void draw_tagdoc(GtkDrawingArea *area, cairo_t *cr, int width, int height
         } else if (state->hover_row >= 0 && state->hover_row < (int)state->visible_rows->len) {
             VisibleRow *vr = &g_array_index(state->visible_rows, VisibleRow, state->hover_row);
             if (vr->type == ROW_TYPE_TAG) {
-                if (state->mouse_x < 220.0) {
+                if (state->mouse_x < label_w) {
                     tooltip_text = g_strdup(state->tag_names[vr->tag_index]);
                 } else if (state->hover_col >= 0 && state->hover_col < state->num_docs) {
                     int val = state->matrix[vr->tag_index][state->hover_col];
@@ -1661,6 +1667,10 @@ static void on_matrix_toggle_top15(GtkToggleButton *btn, gpointer user_data) {
 static void on_mat_click(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data) {
     TagDocState *td = (TagDocState *)user_data;
     
+    GtkWidget *widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    double label_w, col_w;
+    get_matrix_layout(widget, td, 0, &label_w, &col_w);
+    
     if (td->show_top_15) return;
     
     if (td->visible_rows) {
@@ -1668,7 +1678,7 @@ static void on_mat_click(GtkGestureClick *gesture, int n_press, double x, double
             VisibleRow *r = &g_array_index(td->visible_rows, VisibleRow, i);
             if (r->type == ROW_TYPE_GROUP_HEADER) {
                 if (y >= r->y && y < r->y + r->height) {
-                    if (x >= 0.0 && x < 220.0) {
+                    if (x >= 0.0 && x < label_w) {
                         MatGroup *g = g_list_nth_data(td->groups, r->group_index);
                         if (g) {
                             g->collapsed = !g->collapsed;
@@ -1686,6 +1696,11 @@ static void on_mat_click(GtkGestureClick *gesture, int n_press, double x, double
 
 static void on_mat_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data) {
     TagDocState *td = (TagDocState *)user_data;
+    
+    GtkWidget *widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(controller));
+    double label_w, col_w;
+    get_matrix_layout(widget, td, 0, &label_w, &col_w);
+    
     td->mouse_x = x;
     td->mouse_y = y;
     
@@ -1704,9 +1719,9 @@ static void on_mat_motion(GtkEventControllerMotion *controller, double x, double
         }
     }
     
-    if (x >= 220.0) {
-        double col_x = x - 220.0;
-        int col_idx = (int)(col_x / 70.0);
+    if (x >= label_w) {
+        double col_x = x - label_w;
+        int col_idx = (int)(col_x / col_w);
         if (col_idx >= 0 && col_idx < td->num_docs) {
             new_hover_col = col_idx;
         }
@@ -1742,6 +1757,8 @@ GtkWidget* create_matrix_view(CualiAppState *state) {
     update_matrix_area_size(td);
     
     GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_hexpand(scroll, TRUE);
+    gtk_widget_set_vexpand(scroll, TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), area);
     
     // Create view toggle header

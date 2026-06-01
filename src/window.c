@@ -688,7 +688,7 @@ show_tag_dialog (CualiAppState *state, int highlight_id)
     gtk_box_append (GTK_BOX (content_box), entry_box);
 
     GtkWidget *search_entry = gtk_search_entry_new ();
-    gtk_entry_set_placeholder_text (GTK_ENTRY (search_entry), "Buscar etiqueta…");
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (search_entry), "Buscar etiqueta…");
     gtk_widget_set_hexpand (search_entry, TRUE);
     gtk_box_append (GTK_BOX (entry_box), search_entry);
 
@@ -2202,12 +2202,24 @@ static void tag_tree_cell_data_func(GtkTreeViewColumn *col, GtkCellRenderer *ren
     
     if (!color) color = g_strdup("#77767b");
     
+    GdkRGBA rgba;
+    char *hex_color = NULL;
+    if (gdk_rgba_parse(&rgba, color)) {
+        hex_color = g_strdup_printf("#%02X%02X%02X", 
+                                    (int)(rgba.red * 255 + 0.5), 
+                                    (int)(rgba.green * 255 + 0.5), 
+                                    (int)(rgba.blue * 255 + 0.5));
+    } else {
+        hex_color = g_strdup("#77767b");
+    }
+    
     char *markup;
     if (count > 0) {
-        markup = g_strdup_printf("<span foreground=\"%s\">●</span> %s <span foreground=\"#888888\" size=\"smaller\">(%d)</span>", color, name ? name : "", count);
+        markup = g_strdup_printf("<span foreground=\"%s\">●</span> %s <span foreground=\"#888888\" size=\"smaller\">(%d)</span>", hex_color, name ? name : "", count);
     } else {
-        markup = g_strdup_printf("<span foreground=\"%s\">●</span> %s", color, name ? name : "");
+        markup = g_strdup_printf("<span foreground=\"%s\">●</span> %s", hex_color, name ? name : "");
     }
+    g_free(hex_color);
     
     g_object_set(renderer, "markup", markup, NULL);
     
@@ -2672,7 +2684,7 @@ show_context_shifter_dialog (CualiAppState *state, int highlight_id)
     gtk_box_append (GTK_BOX (main_box), entry_box);
     
     GtkWidget *search_entry = gtk_search_entry_new ();
-    gtk_entry_set_placeholder_text (GTK_ENTRY (search_entry), "Buscar etiqueta…");
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (search_entry), "Buscar etiqueta…");
     gtk_widget_set_hexpand (search_entry, TRUE);
     gtk_box_append (GTK_BOX (entry_box), search_entry);
     
@@ -3391,6 +3403,21 @@ on_load_more_results_clicked (CualiAppState *state)
 }
 
 static void
+on_copy_result_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    const char *text = (const char *)g_object_get_data (G_OBJECT (btn), "copy_text");
+    if (text) {
+        GdkClipboard *clipboard = gtk_widget_get_clipboard (GTK_WIDGET (btn));
+        gdk_clipboard_set_text (clipboard, text);
+        if (state && state->toast_overlay) {
+            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
+                                         adw_toast_new ("Cita copiada al portapapeles"));
+        }
+    }
+}
+
+static void
 refresh_results (CualiAppState *state)
 {
   const char *visible_tab = adw_view_stack_get_visible_child_name (ADW_VIEW_STACK (state->view_stack));
@@ -3484,8 +3511,9 @@ refresh_results (CualiAppState *state)
           
           GtkWidget *snip_label = gtk_label_new (NULL);
           char *clean_snippet = strip_html (snippet);
-          gtk_label_set_markup (GTK_LABEL (snip_label), g_strdup_printf ("“%s”", clean_snippet));
-          g_free (clean_snippet);
+          char *snip_markup = g_strdup_printf ("“%s”", clean_snippet);
+          gtk_label_set_markup (GTK_LABEL (snip_label), snip_markup);
+          g_free (snip_markup);
           gtk_label_set_wrap (GTK_LABEL (snip_label), TRUE);
           gtk_widget_set_halign (snip_label, GTK_ALIGN_START);
           gtk_widget_add_css_class (snip_label, "result-snippet");
@@ -3519,11 +3547,15 @@ refresh_results (CualiAppState *state)
           gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (tags_flow), 4);
           gtk_widget_set_halign (tags_flow, GTK_ALIGN_START);
           
+          GString *tags_list = g_string_new("");
           if (tags_str) {
             char **tags = g_strsplit (tags_str, "@@@", -1);
             for (int j = 0; tags[j]; j++) {
                 char **parts = g_strsplit (tags[j], "|||", 2);
                 if (parts[0] && parts[1]) {
+                    if (tags_list->len > 0) g_string_append(tags_list, ", ");
+                    g_string_append(tags_list, parts[0]);
+
                     GtkWidget *tag_badge = gtk_label_new (parts[0]);
                     gtk_widget_add_css_class (tag_badge, "tag-badge");
                     
@@ -3546,6 +3578,18 @@ refresh_results (CualiAppState *state)
             g_strfreev (tags);
           }
           gtk_box_append (GTK_BOX (card), tags_flow);
+          
+          char *copy_text = NULL;
+          const char *tags_to_print = (tags_list->len > 0) ? tags_list->str : "Ninguno";
+          
+          if (memo && strlen(memo) > 0) {
+              copy_text = g_strdup_printf("\"%s\"\n\n%s\n\nCódigos: %s\n\nMemo: %s", clean_snippet, doc_name, tags_to_print, memo);
+          } else {
+              copy_text = g_strdup_printf("\"%s\"\n\n%s\n\nCódigos: %s", clean_snippet, doc_name, tags_to_print);
+          }
+          
+          g_string_free(tags_list, TRUE);
+          g_free(clean_snippet);
      
           /* Footer Row containing Document label */
           GtkWidget *footer_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
@@ -3560,7 +3604,16 @@ refresh_results (CualiAppState *state)
           GtkWidget *doc_label = gtk_label_new (doc_name);
           gtk_widget_add_css_class (doc_label, "result-meta");
           gtk_widget_set_valign (doc_label, GTK_ALIGN_CENTER);
+          gtk_widget_set_hexpand (doc_label, TRUE);
           gtk_box_append (GTK_BOX (footer_box), doc_label);
+          
+          GtkWidget *copy_btn = gtk_button_new_from_icon_name ("edit-copy-symbolic");
+          gtk_widget_set_tooltip_text (copy_btn, "Copiar cita y códigos");
+          gtk_widget_add_css_class (copy_btn, "flat");
+          gtk_widget_set_valign (copy_btn, GTK_ALIGN_CENTER);
+          g_object_set_data_full (G_OBJECT (copy_btn), "copy_text", copy_text, g_free);
+          g_signal_connect (copy_btn, "clicked", G_CALLBACK (on_copy_result_clicked), state);
+          gtk_box_append (GTK_BOX (footer_box), copy_btn);
           
           gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), card);
           gtk_list_box_append (GTK_LIST_BOX (state->results_list), row);
@@ -5127,7 +5180,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     state->highlight_popover = gtk_popover_new();
     gtk_popover_set_has_arrow(GTK_POPOVER(state->highlight_popover), TRUE);
     gtk_popover_set_position(GTK_POPOVER(state->highlight_popover), GTK_POS_BOTTOM);
-    gtk_widget_set_parent(state->highlight_popover, text_view);
+    gtk_text_view_add_overlay(GTK_TEXT_VIEW(text_view), state->highlight_popover, 0, 0);
     build_highlight_dialog(state);
 
     state->highlight_selector = GTK_WIDGET(adw_dialog_new());
@@ -5374,7 +5427,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     gtk_box_append (GTK_BOX (rev_left_vbox), rev_tag_entry_hbox);
 
     state->revision_tag_search_entry = GTK_WIDGET (gtk_search_entry_new ());
-    gtk_entry_set_placeholder_text (GTK_ENTRY (state->revision_tag_search_entry), "Buscar etiqueta…");
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->revision_tag_search_entry), "Buscar etiqueta…");
     gtk_widget_set_hexpand (state->revision_tag_search_entry, TRUE);
     gtk_box_append (GTK_BOX (rev_tag_entry_hbox), state->revision_tag_search_entry);
 
