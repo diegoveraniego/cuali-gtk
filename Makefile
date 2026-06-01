@@ -26,7 +26,7 @@ $(TARGET): $(OBJ)
 	$(CC) -o $@ $^ $(LIBS)
 
 # GUI objects use full CFLAGS
-%.o: %.c
+%.o: %.c include/*.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # CLI objects compiled separately without GTK flags
