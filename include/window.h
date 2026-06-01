@@ -25,7 +25,8 @@ typedef struct {
     GtkWidget *tag_tree_view;
     GtkTreeStore *tag_tree_store;
     GtkWidget *results_list;
-    GtkWidget *results_tag_list;
+    GtkWidget *results_tag_tree_view;
+    GtkWidget *results_search_entry;
     GtkWidget *project_name_entry;
     GtkWidget *project_desc_entry;
     GtkWidget *root_stack;

@@ -306,21 +306,47 @@ load_document (CualiAppState *state, int document_id, const char *name, const ch
 }
 
 static void
-on_results_tag_selected (GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
-{
+on_results_tag_tree_cursor_changed(GtkTreeView *tree_view, gpointer user_data) {
     CualiAppState *state = (CualiAppState *)user_data;
+    GtkTreeSelection *selection = gtk_tree_view_get_selection(tree_view);
+    GtkTreeModel *model;
+    GtkTreeIter iter;
+
     if (state->selected_result_tag) {
         g_free (state->selected_result_tag);
         state->selected_result_tag = NULL;
     }
-    
-    if (row) {
-        const char *tag_path = g_object_get_data (G_OBJECT (row), "tag_path");
-        if (tag_path) {
-            state->selected_result_tag = g_strdup (tag_path);
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        GString *full_path = g_string_new("");
+        GtkTreeIter current = iter;
+        while (TRUE) {
+            char *name = NULL;
+            gtk_tree_model_get(model, &current, 1, &name, -1);
+            if (name) {
+                if (full_path->len > 0) g_string_prepend(full_path, "/");
+                g_string_prepend(full_path, name);
+                g_free(name);
+            }
+            GtkTreeIter parent;
+            if (!gtk_tree_model_iter_parent(model, &parent, &current)) break;
+            current = parent;
+        }
+        if (full_path->len > 0) {
+            state->selected_result_tag = g_string_free(full_path, FALSE);
+        } else {
+            g_string_free(full_path, TRUE);
         }
     }
-    
+
+    state->results_dirty = TRUE;
+    refresh_results(state);
+}
+
+static void
+on_results_search_changed (GtkSearchEntry *entry, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
     state->results_dirty = TRUE;
     refresh_results (state);
 }
@@ -1973,81 +1999,7 @@ on_project_info_changed (GtkEditable *editable, gpointer user_data)
   db_project_update_info (state->current_project_id, name, desc);
 }
 
-static void
-refresh_results_tags (CualiAppState *state)
-{
-  g_signal_handlers_block_by_func(state->results_tag_list, on_results_tag_selected, state);
-  
-  GtkWidget *child;
-  while ((child = gtk_widget_get_first_child (state->results_tag_list)) != NULL)
-    gtk_list_box_remove (GTK_LIST_BOX (state->results_tag_list), child);
 
-  sqlite3_stmt *stmt = db_tags_get_stats (state->current_project_id);
-  if (stmt) {
-    while (sqlite3_step (stmt) == SQLITE_ROW) {
-      int tag_id = sqlite3_column_int(stmt, 0);
-      const char *path = (const char *)sqlite3_column_text (stmt, 1);
-      const char *color = (const char *)sqlite3_column_text(stmt, 2);
-      int count = sqlite3_column_int (stmt, 3);
-      
-      GtkWidget *row = gtk_list_box_row_new ();
-      GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
-      gtk_widget_set_margin_start(box, 12);
-      gtk_widget_set_margin_end(box, 12);
-      gtk_widget_set_margin_top(box, 8);
-      gtk_widget_set_margin_bottom(box, 8);
-      
-      GtkWidget *dot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-      gtk_widget_set_size_request(dot, 10, 10);
-      char *css = g_strdup_printf("box { background-color: %s; border-radius: 5px; }", color ? color : "#77767b");
-      GtkCssProvider *provider = gtk_css_provider_new();
-      gtk_css_provider_load_from_string(provider, css);
-      gtk_style_context_add_provider(gtk_widget_get_style_context(dot),
-                                     GTK_STYLE_PROVIDER(provider),
-                                     GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-      g_free(css);
-      gtk_widget_set_valign(dot, GTK_ALIGN_CENTER);
-      gtk_box_append(GTK_BOX(box), dot);
-      
-      GtkWidget *label = gtk_label_new (path);
-      gtk_widget_set_halign (label, GTK_ALIGN_START);
-      gtk_widget_set_hexpand (label, TRUE);
-      gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
-      gtk_box_append (GTK_BOX (box), label);
-      
-      if (count > 0) {
-          char count_str[16];
-          snprintf (count_str, sizeof(count_str), "%d", count);
-          GtkWidget *count_label = gtk_label_new (count_str);
-          gtk_widget_add_css_class (count_label, "numeric");
-          gtk_widget_add_css_class (count_label, "dim-label");
-          gtk_box_append (GTK_BOX (box), count_label);
-      }
-      
-      GtkWidget *edit_btn = gtk_button_new_from_icon_name ("document-edit-symbolic");
-      gtk_widget_add_css_class (edit_btn, "flat");
-      gtk_widget_set_valign (edit_btn, GTK_ALIGN_CENTER);
-      gtk_widget_set_tooltip_text (edit_btn, "Edit tag");
-      gpointer *ebargs = g_new (gpointer, 2);
-      ebargs[0] = state; ebargs[1] = GINT_TO_POINTER(tag_id);
-      g_signal_connect_data (edit_btn, "clicked", G_CALLBACK (on_tag_edit_btn_clicked),
-                             ebargs, (GClosureNotify)g_free, 0);
-      gtk_box_append (GTK_BOX (box), edit_btn);
-      
-      gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), box);
-      g_object_set_data(G_OBJECT(row), "tag-id", GINT_TO_POINTER(tag_id));
-      g_object_set_data_full (G_OBJECT (row), "tag_path", g_strdup (path), g_free);
-      gtk_list_box_append (GTK_LIST_BOX (state->results_tag_list), row);
-      
-      if (state->selected_result_tag && g_strcmp0(path, state->selected_result_tag) == 0) {
-          gtk_list_box_select_row(GTK_LIST_BOX(state->results_tag_list), GTK_LIST_BOX_ROW(row));
-      }
-    }
-    sqlite3_finalize (stmt);
-  }
-  
-  g_signal_handlers_unblock_by_func(state->results_tag_list, on_results_tag_selected, state);
-}
 
 /* ── Etiquetas jerarquicas ── */
 
@@ -2307,11 +2259,13 @@ refresh_tags (CualiAppState *state)
         gtk_tree_store_clear(state->tag_tree_store);
         populate_tag_store(&root, state->tag_tree_store, NULL);
         gtk_tree_view_expand_all(GTK_TREE_VIEW(state->tag_tree_view));
+        if (state->results_tag_tree_view) {
+            gtk_tree_view_expand_all(GTK_TREE_VIEW(state->results_tag_tree_view));
+        }
     }
 
     g_list_free_full (root.children, (GDestroyNotify) tag_node_free);
     refresh_stats (state);
-    refresh_results_tags (state);
     refresh_visualizations (state);
 }
 
@@ -3477,6 +3431,22 @@ refresh_results (CualiAppState *state)
                   g_strfreev (tags);
               }
           }
+          
+          if (match && state->results_search_entry) {
+              const char *query = gtk_editable_get_text (GTK_EDITABLE (state->results_search_entry));
+              if (query && *query != '\0') {
+                  char *clean_snippet = strip_html (res->snippet);
+                  char *folded_snippet = g_utf8_casefold (clean_snippet, -1);
+                  char *folded_query = g_utf8_casefold (query, -1);
+                  if (!g_strrstr (folded_snippet, folded_query)) {
+                      match = FALSE;
+                  }
+                  g_free (folded_query);
+                  g_free (folded_snippet);
+                  g_free (clean_snippet);
+              }
+          }
+
           if (!match) continue;
 
           if (count >= limit) {
@@ -5546,11 +5516,19 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     GtkWidget *res_tag_scroll = gtk_scrolled_window_new ();
     gtk_widget_set_vexpand (res_tag_scroll, TRUE);
     gtk_box_append (GTK_BOX (res_sidebar), res_tag_scroll);
-    state->results_tag_list = gtk_list_box_new ();
-    gtk_widget_add_css_class (state->results_tag_list, "sidebar-list");
-    gtk_widget_add_css_class (state->results_tag_list, "boxed-list");
-    g_signal_connect (state->results_tag_list, "row-selected", G_CALLBACK (on_results_tag_selected), state);
-    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_tag_scroll), state->results_tag_list);
+    state->results_tag_tree_view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(state->tag_tree_store));
+    gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(state->results_tag_tree_view), FALSE);
+    gtk_widget_add_css_class(state->results_tag_tree_view, "sidebar-list");
+    
+    GtkTreeViewColumn *col_res = gtk_tree_view_column_new();
+    GtkCellRenderer *renderer_res = gtk_cell_renderer_text_new();
+    gtk_tree_view_column_pack_start(col_res, renderer_res, TRUE);
+    gtk_tree_view_column_set_cell_data_func(col_res, renderer_res, tag_tree_cell_data_func, NULL, NULL);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(state->results_tag_tree_view), col_res);
+    
+    g_signal_connect(state->results_tag_tree_view, "cursor-changed", G_CALLBACK(on_results_tag_tree_cursor_changed), state);
+    
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_tag_scroll), state->results_tag_tree_view);
 
     /* Contenido: caja vertical con toolbar + lista */
     GtkWidget *res_content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -5574,6 +5552,13 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     g_signal_connect (res_toggle_btn, "toggled",
                       G_CALLBACK (on_res_sidebar_toggle),
                       res_split_view);
+
+    state->results_search_entry = gtk_search_entry_new ();
+    gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (state->results_search_entry), "Search in results...");
+    gtk_widget_set_margin_start (state->results_search_entry, 12);
+    gtk_widget_set_hexpand (state->results_search_entry, TRUE);
+    g_signal_connect (state->results_search_entry, "search-changed", G_CALLBACK (on_results_search_changed), state);
+    gtk_box_append (GTK_BOX (res_toolbar), state->results_search_entry);
                       
     GtkWidget *res_zoom_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_halign (res_zoom_box, GTK_ALIGN_END);
