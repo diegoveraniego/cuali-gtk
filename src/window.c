@@ -343,6 +343,182 @@ on_results_tag_tree_cursor_changed(GtkTreeView *tree_view, gpointer user_data) {
     refresh_results(state);
 }
 
+static void on_results_tag_edit_clicked(GtkButton *btn, gpointer user_data);
+static void on_results_tag_merge_clicked(GtkButton *btn, gpointer user_data);
+
+static void on_results_tag_tree_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    GtkTreePath *path;
+    if (gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(state->results_tag_tree_view), (int)x, (int)y, &path, NULL, NULL, NULL)) {
+        GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(state->results_tag_tree_view));
+        gtk_tree_selection_select_path(selection, path);
+        
+        GtkTreeModel *model;
+        GtkTreeIter iter;
+        if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+            int tag_id = -1;
+            gtk_tree_model_get(model, &iter, 0, &tag_id, -1);
+            state->results_context_tag_id = tag_id;
+            
+            GdkRectangle rect = { (int)x, (int)y, 1, 1 };
+            gtk_popover_set_pointing_to(GTK_POPOVER(state->results_tag_popover), &rect);
+            gtk_popover_popup(GTK_POPOVER(state->results_tag_popover));
+        }
+        gtk_tree_path_free(path);
+    }
+}
+
+static void on_edit_tag_save_clicked(GtkButton *btn, gpointer user_data) {
+    GtkWidget *dialog = GTK_WIDGET(g_object_get_data(G_OBJECT(btn), "dialog"));
+    CualiAppState *state = (CualiAppState *)g_object_get_data(G_OBJECT(btn), "state");
+    GtkEntry *name_entry = GTK_ENTRY(g_object_get_data(G_OBJECT(btn), "name_entry"));
+    GtkEntry *desc_entry = GTK_ENTRY(g_object_get_data(G_OBJECT(btn), "desc_entry"));
+    
+    const char *new_name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
+    const char *new_desc = gtk_editable_get_text(GTK_EDITABLE(desc_entry));
+    
+    if (strlen(new_name) > 0) {
+        db_tag_update(state->results_context_tag_id, new_name, new_desc);
+        refresh_tags(state);
+        state->results_dirty = TRUE;
+        refresh_results(state);
+    }
+    
+    adw_dialog_close(ADW_DIALOG(dialog));
+}
+
+static void on_results_tag_edit_clicked(GtkButton *btn, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    gtk_popover_popdown(GTK_POPOVER(state->results_tag_popover));
+    
+    char *path = NULL, *desc = NULL;
+    if (!db_tag_get_info(state->results_context_tag_id, &path, &desc, NULL)) return;
+    
+    GtkWidget *dialog = GTK_WIDGET(adw_dialog_new());
+    adw_dialog_set_title(ADW_DIALOG(dialog), "Editar Etiqueta");
+    adw_dialog_set_content_width(ADW_DIALOG(dialog), 400);
+    
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(box, 16);
+    gtk_widget_set_margin_end(box, 16);
+    gtk_widget_set_margin_top(box, 16);
+    gtk_widget_set_margin_bottom(box, 16);
+    
+    GtkWidget *name_label = gtk_label_new("Ruta / Nombre:");
+    gtk_widget_set_halign(name_label, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(box), name_label);
+    
+    GtkWidget *name_entry = gtk_entry_new();
+    gtk_editable_set_text(GTK_EDITABLE(name_entry), path ? path : "");
+    gtk_box_append(GTK_BOX(box), name_entry);
+    
+    GtkWidget *desc_label = gtk_label_new("Descripción:");
+    gtk_widget_set_halign(desc_label, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(box), desc_label);
+    
+    GtkWidget *desc_entry = gtk_entry_new();
+    gtk_editable_set_text(GTK_EDITABLE(desc_entry), desc ? desc : "");
+    gtk_box_append(GTK_BOX(box), desc_entry);
+    
+    GtkWidget *save_btn = gtk_button_new_with_label("Guardar");
+    gtk_widget_add_css_class(save_btn, "suggested-action");
+    gtk_widget_set_halign(save_btn, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(save_btn, 12);
+    gtk_box_append(GTK_BOX(box), save_btn);
+    
+    g_object_set_data(G_OBJECT(save_btn), "dialog", dialog);
+    g_object_set_data(G_OBJECT(save_btn), "state", state);
+    g_object_set_data(G_OBJECT(save_btn), "name_entry", name_entry);
+    g_object_set_data(G_OBJECT(save_btn), "desc_entry", desc_entry);
+    g_signal_connect(save_btn, "clicked", G_CALLBACK(on_edit_tag_save_clicked), NULL);
+    
+    adw_dialog_set_child(ADW_DIALOG(dialog), box);
+    adw_dialog_present(ADW_DIALOG(dialog), state->window);
+    
+    g_free(path);
+    g_free(desc);
+}
+
+static void on_merge_tag_save_clicked(GtkButton *btn, gpointer user_data) {
+    GtkWidget *dialog = GTK_WIDGET(g_object_get_data(G_OBJECT(btn), "dialog"));
+    CualiAppState *state = (CualiAppState *)g_object_get_data(G_OBJECT(btn), "state");
+    GtkDropDown *dropdown = GTK_DROP_DOWN(g_object_get_data(G_OBJECT(btn), "dropdown"));
+    
+    guint selected_pos = gtk_drop_down_get_selected(dropdown);
+    GListModel *model = gtk_drop_down_get_model(dropdown);
+    if (selected_pos == GTK_INVALID_LIST_POSITION) return;
+    
+    GtkStringObject *strobj = GTK_STRING_OBJECT(g_list_model_get_item(model, selected_pos));
+    const char *sel_str = gtk_string_object_get_string(strobj);
+    
+    int target_id = atoi(sel_str); 
+    
+    if (target_id > 0 && target_id != state->results_context_tag_id) {
+        if (db_tag_merge(state->results_context_tag_id, target_id)) {
+            refresh_tags(state);
+            state->results_dirty = TRUE;
+            refresh_results(state);
+        } else {
+            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
+                                         adw_toast_new ("Error al fusionar la etiqueta"));
+        }
+    }
+    
+    g_object_unref(strobj);
+    adw_dialog_close(ADW_DIALOG(dialog));
+}
+
+static void on_results_tag_merge_clicked(GtkButton *btn, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    gtk_popover_popdown(GTK_POPOVER(state->results_tag_popover));
+    
+    GtkWidget *dialog = GTK_WIDGET(adw_dialog_new());
+    adw_dialog_set_title(ADW_DIALOG(dialog), "Fusionar Etiqueta");
+    adw_dialog_set_content_width(ADW_DIALOG(dialog), 400);
+    
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(box, 16);
+    gtk_widget_set_margin_end(box, 16);
+    gtk_widget_set_margin_top(box, 16);
+    gtk_widget_set_margin_bottom(box, 16);
+    
+    GtkWidget *lbl = gtk_label_new("Selecciona la etiqueta destino:");
+    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(box), lbl);
+    
+    GtkStringList *strlist = gtk_string_list_new(NULL);
+    sqlite3_stmt *stmt = db_tags_get_all(state->current_project_id);
+    if (stmt) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            int id = sqlite3_column_int(stmt, 0);
+            if (id == state->results_context_tag_id) continue;
+            const char *path = (const char *)sqlite3_column_text(stmt, 1);
+            char *encoded = g_strdup_printf("%d: %s", id, path);
+            gtk_string_list_append(strlist, encoded);
+            g_free(encoded);
+        }
+        sqlite3_finalize(stmt);
+    }
+    
+    GtkWidget *dropdown = gtk_drop_down_new(G_LIST_MODEL(strlist), NULL);
+    gtk_drop_down_set_enable_search(GTK_DROP_DOWN(dropdown), TRUE);
+    gtk_box_append(GTK_BOX(box), dropdown);
+    
+    GtkWidget *save_btn = gtk_button_new_with_label("Fusionar");
+    gtk_widget_add_css_class(save_btn, "destructive-action");
+    gtk_widget_set_halign(save_btn, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(save_btn, 12);
+    gtk_box_append(GTK_BOX(box), save_btn);
+    
+    g_object_set_data(G_OBJECT(save_btn), "dialog", dialog);
+    g_object_set_data(G_OBJECT(save_btn), "state", state);
+    g_object_set_data(G_OBJECT(save_btn), "dropdown", dropdown);
+    g_signal_connect(save_btn, "clicked", G_CALLBACK(on_merge_tag_save_clicked), NULL);
+    
+    adw_dialog_set_child(ADW_DIALOG(dialog), box);
+    adw_dialog_present(ADW_DIALOG(dialog), state->window);
+}
+
 static void
 on_results_search_changed (GtkSearchEntry *entry, gpointer user_data)
 {
@@ -5529,6 +5705,28 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     g_signal_connect(state->results_tag_tree_view, "cursor-changed", G_CALLBACK(on_results_tag_tree_cursor_changed), state);
     
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (res_tag_scroll), state->results_tag_tree_view);
+
+    GtkGesture *res_click = gtk_gesture_click_new ();
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (res_click), GDK_BUTTON_SECONDARY);
+    g_signal_connect (res_click, "pressed", G_CALLBACK (on_results_tag_tree_pressed), state);
+    gtk_widget_add_controller (state->results_tag_tree_view, GTK_EVENT_CONTROLLER (res_click));
+
+    state->results_tag_popover = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(state->results_tag_popover), FALSE);
+    gtk_widget_set_parent(state->results_tag_popover, state->results_tag_tree_view);
+    
+    GtkWidget *res_pop_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *btn_edit = gtk_button_new_with_label("Editar etiqueta...");
+    gtk_widget_add_css_class(btn_edit, "flat");
+    g_signal_connect(btn_edit, "clicked", G_CALLBACK(on_results_tag_edit_clicked), state);
+    gtk_box_append(GTK_BOX(res_pop_box), btn_edit);
+    
+    GtkWidget *btn_merge = gtk_button_new_with_label("Fusionar etiqueta...");
+    gtk_widget_add_css_class(btn_merge, "flat");
+    g_signal_connect(btn_merge, "clicked", G_CALLBACK(on_results_tag_merge_clicked), state);
+    gtk_box_append(GTK_BOX(res_pop_box), btn_merge);
+    
+    gtk_popover_set_child(GTK_POPOVER(state->results_tag_popover), res_pop_box);
 
     /* Contenido: caja vertical con toolbar + lista */
     GtkWidget *res_content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);

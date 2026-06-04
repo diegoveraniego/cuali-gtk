@@ -25,6 +25,7 @@ bool db_tag_update(int tag_id, const char *path, const char *description);
 bool db_tag_update_color(int tag_id, const char *color);
 bool db_tag_get_info(int tag_id, char **path, char **description, char **color);
 bool db_tag_delete(int tag_id);
+bool db_tag_merge(int old_tag_id, int new_tag_id);
 sqlite3_stmt* db_tags_get_all(int project_id);
 sqlite3_stmt* db_tags_get_for_highlight(int highlight_id);
 sqlite3_stmt* db_tags_get_stats(int project_id);

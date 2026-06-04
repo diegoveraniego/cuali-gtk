@@ -524,6 +524,42 @@ bool db_tag_delete(int tag_id) {
     return success;
 }
 
+bool db_tag_merge(int old_tag_id, int new_tag_id) {
+    if (!db) return false;
+    sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
+    sqlite3_stmt *stmt;
+    
+    // 1. Update OR IGNORE (handles cases where highlight doesn't have the new tag)
+    const char *sql_update = "UPDATE OR IGNORE highlight_tags SET tag_id = ? WHERE tag_id = ?;";
+    if (sqlite3_prepare_v2(db, sql_update, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, new_tag_id);
+        sqlite3_bind_int(stmt, 2, old_tag_id);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    
+    // 2. Delete remaining old tags (cases where highlight already had the new tag, so UPDATE was ignored)
+    const char *sql_del_ht = "DELETE FROM highlight_tags WHERE tag_id = ?;";
+    if (sqlite3_prepare_v2(db, sql_del_ht, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, old_tag_id);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    
+    // 3. Delete old tag itself
+    const char *sql_del_t = "DELETE FROM tags WHERE id = ?;";
+    if (sqlite3_prepare_v2(db, sql_del_t, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+        return false;
+    }
+    sqlite3_bind_int(stmt, 1, old_tag_id);
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    
+    sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL);
+    return success;
+}
+
 bool db_project_clear_tags(int project_id) {
     if (!db) return false;
     sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);

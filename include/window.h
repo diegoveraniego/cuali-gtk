@@ -43,6 +43,8 @@ typedef struct {
     int revision_last_project_id;
     gboolean revision_dirty;
     int results_limit;
+    int results_context_tag_id;
+    GtkWidget *results_tag_popover;
     /* [NUEVO] */
     GtkWidget *highlight_popover;
     GtkWidget *popover_tag_list;
