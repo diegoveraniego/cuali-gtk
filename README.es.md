@@ -133,6 +133,18 @@ cuali-gtk/
 - [ ] Soporte multi-idioma (i18n)
 - [ ] Temas personalizables
 
+## Estado del Proyecto y Pruebas (Beta Testers)
+
+Este proyecto está en **desarrollo activo y experimental**. Si deseas colaborar, nos sería de enorme ayuda contar con **personas que prueben la aplicación** (especialmente en diferentes distribuciones de Linux, Windows y macOS) y reporten cualquier fallo o sugerencia.
+
+Para probar la **compatibilidad con Taguette**:
+1. Crea un proyecto en Taguette e impórtale algunos documentos y códigos.
+2. Abre la base de datos `.sqlite3` generada directamente en **Cuali** y verifica que las citas y etiquetas se muestren correctamente. También puedes hacerlo a la inversa.
+
+## Declaración del Creador
+
+Cuali no es el trabajo de un programador profesional. Ha sido diseñado y construido con mucho respeto por la comunidad académica y científica, con el único fin de aportar una alternativa libre (FOSS) y ligera para quienes no pueden costear licencias corporativas caras. En un futuro, conforme el creador adquiera mayor dominio en la programación, se contempla realizar una reescritura desde cero para optimizar el rendimiento de la aplicación.
+
 ## Contribuciones y Soporte
 
 Las contribuciones son bienvenidas. Si encuentras un error, tienes una solicitud de función o deseas contribuir con código, no dudes en abrir un issue o enviar un Pull Request.

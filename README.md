@@ -148,6 +148,18 @@ cuali-gtk/
 - [ ] Multi-language support (i18n)
 - [ ] Make demo project for people testing
       
+## Project Status & Testing (Beta Testers)
+
+This project is under **active, experimental development**. We are looking for **beta testers** to run the app (especially across different Linux distros, Windows, and macOS) and report any issues or improvements.
+
+To test **Taguette compatibility**:
+1. Create a project in Taguette, import some documents, and apply some tags.
+2. Open the resulting `.sqlite3` file directly in **Cuali** and verify that your highlights and tags load correctly (and vice-versa).
+
+## Creator's Note
+
+Cuali is not the work of a professional programmer. It has been designed and built with deep respect for the research community, aiming to provide a lightweight, open alternative (FOSS) for those who cannot afford expensive proprietary licenses. In the future, as the creator's coding skills grow, a full rewrite from scratch is planned to optimize the architecture and performance.
+
 ## Contributing & Support
 
 Contributions are welcome. If you find a bug, have a feature request, or want to contribute code, please feel free to open an issue or submit a Pull Request.
