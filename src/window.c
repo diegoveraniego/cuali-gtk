@@ -8,6 +8,10 @@
 #include <math.h>
 #include "visualizations.h"
 
+// Tag Manager Logic
+static void refresh_tag_manager(CualiAppState *state);
+static GtkWidget* create_tag_manager_view(CualiAppState *state);
+
 const char *style_css = 
   "* { font-family: \"Inter\", sans-serif; }"
   "textview { font-family: \"Inter\", sans-serif; font-size: 11pt; font-weight: 400; letter-spacing: 0.01em; }"
@@ -147,6 +151,7 @@ static void on_revision_end_forward_clicked (GtkButton *btn, gpointer user_data)
 static void on_revision_new_tag_activated (GtkEntry *entry, gpointer user_data);
 static void on_revision_sidebar_search_changed (GtkSearchEntry *entry, gpointer user_data);
 static gboolean revision_sidebar_filter_func (GtkListBoxRow *row, gpointer user_data);
+static void on_copy_all_results_clicked (GtkButton *btn, gpointer user_data);
 
 typedef struct {
     CualiAppState *state;
@@ -368,75 +373,13 @@ static void on_results_tag_tree_pressed(GtkGestureClick *gesture, int n_press, d
     }
 }
 
-static void on_edit_tag_save_clicked(GtkButton *btn, gpointer user_data) {
-    GtkWidget *dialog = GTK_WIDGET(g_object_get_data(G_OBJECT(btn), "dialog"));
-    CualiAppState *state = (CualiAppState *)g_object_get_data(G_OBJECT(btn), "state");
-    GtkEntry *name_entry = GTK_ENTRY(g_object_get_data(G_OBJECT(btn), "name_entry"));
-    GtkEntry *desc_entry = GTK_ENTRY(g_object_get_data(G_OBJECT(btn), "desc_entry"));
-    
-    const char *new_name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
-    const char *new_desc = gtk_editable_get_text(GTK_EDITABLE(desc_entry));
-    
-    if (strlen(new_name) > 0) {
-        db_tag_update(state->results_context_tag_id, new_name, new_desc);
-        refresh_tags(state);
-        state->results_dirty = TRUE;
-        refresh_results(state);
-    }
-    
-    adw_dialog_close(ADW_DIALOG(dialog));
-}
-
 static void on_results_tag_edit_clicked(GtkButton *btn, gpointer user_data) {
     CualiAppState *state = (CualiAppState *)user_data;
     gtk_popover_popdown(GTK_POPOVER(state->results_tag_popover));
     
-    char *path = NULL, *desc = NULL;
-    if (!db_tag_get_info(state->results_context_tag_id, &path, &desc, NULL)) return;
-    
-    GtkWidget *dialog = GTK_WIDGET(adw_dialog_new());
-    adw_dialog_set_title(ADW_DIALOG(dialog), "Editar Etiqueta");
-    adw_dialog_set_content_width(ADW_DIALOG(dialog), 400);
-    
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_start(box, 16);
-    gtk_widget_set_margin_end(box, 16);
-    gtk_widget_set_margin_top(box, 16);
-    gtk_widget_set_margin_bottom(box, 16);
-    
-    GtkWidget *name_label = gtk_label_new("Ruta / Nombre:");
-    gtk_widget_set_halign(name_label, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(box), name_label);
-    
-    GtkWidget *name_entry = gtk_entry_new();
-    gtk_editable_set_text(GTK_EDITABLE(name_entry), path ? path : "");
-    gtk_box_append(GTK_BOX(box), name_entry);
-    
-    GtkWidget *desc_label = gtk_label_new("Descripción:");
-    gtk_widget_set_halign(desc_label, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(box), desc_label);
-    
-    GtkWidget *desc_entry = gtk_entry_new();
-    gtk_editable_set_text(GTK_EDITABLE(desc_entry), desc ? desc : "");
-    gtk_box_append(GTK_BOX(box), desc_entry);
-    
-    GtkWidget *save_btn = gtk_button_new_with_label("Guardar");
-    gtk_widget_add_css_class(save_btn, "suggested-action");
-    gtk_widget_set_halign(save_btn, GTK_ALIGN_END);
-    gtk_widget_set_margin_top(save_btn, 12);
-    gtk_box_append(GTK_BOX(box), save_btn);
-    
-    g_object_set_data(G_OBJECT(save_btn), "dialog", dialog);
-    g_object_set_data(G_OBJECT(save_btn), "state", state);
-    g_object_set_data(G_OBJECT(save_btn), "name_entry", name_entry);
-    g_object_set_data(G_OBJECT(save_btn), "desc_entry", desc_entry);
-    g_signal_connect(save_btn, "clicked", G_CALLBACK(on_edit_tag_save_clicked), NULL);
-    
-    adw_dialog_set_child(ADW_DIALOG(dialog), box);
-    adw_dialog_present(ADW_DIALOG(dialog), state->window);
-    
-    g_free(path);
-    g_free(desc);
+    if (state->results_context_tag_id > 0) {
+        show_tag_edit_dialog(state, state->results_context_tag_id);
+    }
 }
 
 static void on_merge_tag_save_clicked(GtkButton *btn, gpointer user_data) {
@@ -3548,6 +3491,113 @@ on_copy_result_clicked (GtkButton *btn, gpointer user_data)
 }
 
 static void
+on_copy_all_results_clicked (GtkButton *btn, gpointer user_data)
+{
+    CualiAppState *state = (CualiAppState *)user_data;
+    if (!state->cached_results || state->cached_results->len == 0) {
+        return;
+    }
+    
+    GString *all_text = g_string_new ("");
+    guint len = state->cached_results->len;
+    int count = 0;
+    
+    for (guint i = 0; i < len; i++) {
+        ResultRow *res = g_ptr_array_index (state->cached_results, i);
+        
+        gboolean match = TRUE;
+        if (state->selected_result_tag) {
+            match = FALSE;
+            if (res->tags_str) {
+                char **tags = g_strsplit (res->tags_str, "@@@", -1);
+                size_t sel_len = strlen (state->selected_result_tag);
+                for (int j = 0; tags[j]; j++) {
+                    char **parts = g_strsplit (tags[j], "|||", 2);
+                    if (parts[0]) {
+                        if (g_strcmp0 (parts[0], state->selected_result_tag) == 0 ||
+                            (strncmp (parts[0], state->selected_result_tag, sel_len) == 0 &&
+                             parts[0][sel_len] == '/')) {
+                            match = TRUE;
+                        }
+                    }
+                    g_strfreev (parts);
+                    if (match) break;
+                }
+                g_strfreev (tags);
+            }
+        }
+        
+        if (match && state->results_search_entry) {
+            const char *query = gtk_editable_get_text (GTK_EDITABLE (state->results_search_entry));
+            if (query && *query != '\0') {
+                char *clean_snippet = strip_html (res->snippet);
+                char *folded_snippet = g_utf8_casefold (clean_snippet, -1);
+                char *folded_query = g_utf8_casefold (query, -1);
+                if (!g_strrstr (folded_snippet, folded_query)) {
+                    match = FALSE;
+                }
+                g_free (folded_query);
+                g_free (folded_snippet);
+                g_free (clean_snippet);
+            }
+        }
+        
+        if (!match) continue;
+        
+        char *clean_snippet = strip_html (res->snippet);
+        GString *tags_list = g_string_new ("");
+        if (res->tags_str) {
+            char **tags = g_strsplit (res->tags_str, "@@@", -1);
+            for (int j = 0; tags[j]; j++) {
+                char **parts = g_strsplit (tags[j], "|||", 2);
+                if (parts[0]) {
+                    if (tags_list->len > 0) g_string_append (tags_list, ", ");
+                    g_string_append (tags_list, parts[0]);
+                }
+                g_strfreev (parts);
+            }
+            g_strfreev (tags);
+        }
+        
+        const char *tags_to_print = (tags_list->len > 0) ? tags_list->str : "Ninguno";
+        
+        if (all_text->len > 0) {
+            g_string_append (all_text, "\n\n--------------------------------------------------\n\n");
+        }
+        
+        if (res->memo && strlen (res->memo) > 0) {
+            g_string_append_printf (all_text, "\"%s\"\n\n%s\n\nCódigos: %s\n\nMemo: %s", 
+                                    clean_snippet, res->doc_name, tags_to_print, res->memo);
+        } else {
+            g_string_append_printf (all_text, "\"%s\"\n\n%s\n\nCódigos: %s", 
+                                    clean_snippet, res->doc_name, tags_to_print);
+        }
+        
+        g_string_free (tags_list, TRUE);
+        g_free (clean_snippet);
+        count++;
+    }
+    
+    if (all_text->len > 0) {
+        GdkClipboard *clipboard = gtk_widget_get_clipboard (GTK_WIDGET (btn));
+        gdk_clipboard_set_text (clipboard, all_text->str);
+        if (state && state->toast_overlay) {
+            char *msg = g_strdup_printf ("%d citas copiadas al portapapeles", count);
+            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
+                                         adw_toast_new (msg));
+            g_free (msg);
+        }
+    } else {
+        if (state && state->toast_overlay) {
+            adw_toast_overlay_add_toast (ADW_TOAST_OVERLAY (state->toast_overlay),
+                                         adw_toast_new ("No hay citas para copiar"));
+        }
+    }
+    
+    g_string_free (all_text, TRUE);
+}
+
+static void
 refresh_results (CualiAppState *state)
 {
   const char *visible_tab = adw_view_stack_get_visible_child_name (ADW_VIEW_STACK (state->view_stack));
@@ -4342,6 +4392,7 @@ on_view_stack_visible_child_changed (GObject *object, GParamSpec *pspec, gpointe
     if (g_strcmp0 (name, "results") == 0) refresh_results (state);
     if (g_strcmp0 (name, "revision") == 0) refresh_revision_list (state);
     if (g_strcmp0 (name, "info") == 0) refresh_project_info (state);
+    if (g_strcmp0 (name, "tag_manager") == 0) refresh_tag_manager (state);
 }
 static void update_vim_status(CualiAppState *state) {
     if (!state->vim_enabled || !state->vim_mode_label) {
@@ -5668,6 +5719,12 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), results_box, "results", "Results");
     adw_view_stack_page_set_icon_name (page, "cuali-results-symbolic");
 
+    
+    /* --- Pestaña 4: Gestor de Etiquetas --- */
+    GtkWidget *tag_manager_view = create_tag_manager_view(state);
+    page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), tag_manager_view, "tag_manager", "Tag Manager");
+    adw_view_stack_page_set_icon_name (page, "view-list-symbolic");
+
     /* 5. Visualizations View */
     GtkWidget *viz_view = create_visualizations_view(state);
     page = adw_view_stack_add_titled (ADW_VIEW_STACK (state->view_stack), viz_view, "visualizations", "Visualizations");
@@ -5713,7 +5770,7 @@ void window_init_with_file(GtkApplication *app, const char *path) {
 
     state->results_tag_popover = gtk_popover_new();
     gtk_popover_set_has_arrow(GTK_POPOVER(state->results_tag_popover), FALSE);
-    gtk_widget_set_parent(state->results_tag_popover, state->results_tag_tree_view);
+    gtk_widget_set_parent(state->results_tag_popover, res_sidebar);
     
     GtkWidget *res_pop_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     GtkWidget *btn_edit = gtk_button_new_with_label("Editar etiqueta...");
@@ -5774,6 +5831,12 @@ void window_init_with_file(GtkApplication *app, const char *path) {
     g_signal_connect (res_zoom_in, "clicked", G_CALLBACK (on_zoom_in_clicked), state);
     gtk_box_append (GTK_BOX (res_zoom_box), res_zoom_in);
 
+    GtkWidget *res_copy_all_btn = gtk_button_new_from_icon_name ("edit-copy-symbolic");
+    gtk_widget_add_css_class (res_copy_all_btn, "flat");
+    gtk_widget_set_tooltip_text (res_copy_all_btn, "Copiar todos los segmentos filtrados");
+    g_signal_connect (res_copy_all_btn, "clicked", G_CALLBACK (on_copy_all_results_clicked), state);
+    gtk_box_append (GTK_BOX (res_zoom_box), res_copy_all_btn);
+
     gtk_box_append (GTK_BOX (res_toolbar), res_zoom_box);
 
     GtkWidget *res_sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
@@ -5808,6 +5871,283 @@ void window_init_with_file(GtkApplication *app, const char *path) {
         open_project_at_path (state, path, -1);
     }
 }
+
+// ------------------ TAG MANAGER ------------------
+
+static void traverse_and_copy_model(GtkTreeModel *src_model, GtkTreeIter *src_iter, GtkTreeStore *dest_store, GtkTreeIter *dest_parent) {
+    GtkTreeIter dest_iter;
+    gtk_tree_store_append(dest_store, &dest_iter, dest_parent);
+    
+    int tag_id, count;
+    char *name, *color;
+    
+    // Source store has 4 cols: 0=id, 1=name, 2=color, 3=count
+    gtk_tree_model_get(src_model, src_iter, 
+                       0, &tag_id, 1, &name, 2, &color, 3, &count, -1);
+    
+    // Build full path from name for display; the actual renaming uses the path entry
+    // dest store: 0=id, 1=name, 2=color, 3=count, 4=draft_path (editable), 5=modified
+    gtk_tree_store_set(dest_store, &dest_iter,
+                       0, tag_id, 1, name, 2, color, 3, count, 4, name, 5, FALSE, -1);
+                       
+    g_free(name); g_free(color);
+    
+    GtkTreeIter src_child;
+    if (gtk_tree_model_iter_children(src_model, &src_child, src_iter)) {
+        do {
+            traverse_and_copy_model(src_model, &src_child, dest_store, &dest_iter);
+        } while (gtk_tree_model_iter_next(src_model, &src_child));
+    }
+}
+
+static void populate_manager_store(TagNode *n, GtkTreeStore *store, GtkTreeIter *parent_iter, const char *parent_path) {
+    GtkTreeIter iter;
+    char *full_path = NULL;
+
+    if (n->name) {
+        full_path = parent_path
+            ? g_strdup_printf("%s/%s", parent_path, n->name)
+            : g_strdup(n->name);
+
+        gtk_tree_store_append(store, &iter, parent_iter);
+        gtk_tree_store_set(store, &iter,
+            0, n->tag_id,
+            1, n->name,
+            2, n->color,
+            3, n->count,
+            4, full_path,   // editable draft path
+            5, FALSE,       // not modified
+            -1);
+    }
+
+    GtkTreeIter *new_parent = n->name ? &iter : parent_iter;
+    const char  *new_path   = full_path ? full_path : parent_path;
+
+    for (GList *l = n->children; l; l = l->next) {
+        populate_manager_store((TagNode *)l->data, store, new_parent, new_path);
+    }
+
+    g_free(full_path);
+}
+
+static void refresh_tag_manager(CualiAppState *state) {
+    if (!state->manager_tag_tree_store) return;
+    if (!db_is_open()) return;
+
+    gtk_tree_store_clear(state->manager_tag_tree_store);
+
+    sqlite3_stmt *stmt = db_tags_get_stats(state->current_project_id);
+    if (!stmt) return;
+
+    /* Build same TagNode tree as refresh_tags */
+    TagNode root = {0};
+    root.name = NULL;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int         tag_id = sqlite3_column_int(stmt, 0);
+        const char *path   = (const char *)sqlite3_column_text(stmt, 1);
+        const char *color  = (const char *)sqlite3_column_text(stmt, 2);
+        int         count  = sqlite3_column_int(stmt, 3);
+
+        char **parts   = g_strsplit(path, "/", -1);
+        int    n_parts = g_strv_length(parts);
+
+        TagNode *parent = &root;
+        for (int i = 0; i < n_parts; i++) {
+            int idx = tag_node_find_child(parent->children, parts[i]);
+            if (idx >= 0) {
+                parent = (TagNode *)g_list_nth_data(parent->children, idx);
+            } else {
+                TagNode *nd = tag_node_new(parts[i]);
+                parent->children = g_list_append(parent->children, nd);
+                parent = nd;
+            }
+        }
+        parent->tag_id = tag_id;
+        parent->color  = g_strdup(color);
+        parent->count  = count;
+        g_strfreev(parts);
+    }
+    sqlite3_finalize(stmt);
+
+    /* Populate store with full hierarchy */
+    populate_manager_store(&root, state->manager_tag_tree_store, NULL, NULL);
+
+    /* Expand all so user sees the full tree */
+    if (state->manager_tag_tree_view) {
+        gtk_tree_view_expand_all(GTK_TREE_VIEW(state->manager_tag_tree_view));
+    }
+
+    g_list_free_full(root.children, (GDestroyNotify)tag_node_free);
+}
+
+
+
+
+static gboolean apply_draft_changes_func(GtkTreeModel *model, GtkTreePath *path, GtkTreeIter *iter, gpointer data) {
+    CualiAppState *state = (CualiAppState *)data;
+    gboolean modified;
+    int tag_id;
+    char *new_full_path;
+    
+    gtk_tree_model_get(model, iter, 0, &tag_id, 4, &new_full_path, 5, &modified, -1);
+    
+    if (modified && tag_id > 0 && new_full_path) {
+        char *desc = NULL, *color = NULL, *old_path = NULL;
+        if (db_tag_get_info(tag_id, &old_path, &desc, &color)) {
+            db_tag_update(tag_id, new_full_path, desc);
+            g_free(old_path); g_free(desc); g_free(color);
+        }
+    }
+    
+    g_free(new_full_path);
+    return FALSE; // continue traversing
+}
+
+static void on_tag_manager_apply_clicked(GtkButton *btn, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    
+    GtkTreeModel *model = GTK_TREE_MODEL(state->manager_tag_tree_store);
+    gtk_tree_model_foreach(model, apply_draft_changes_func, state);
+    
+    refresh_tags(state);
+    refresh_tag_manager(state);
+}
+
+static void on_tag_manager_undo_clicked(GtkButton *btn, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    refresh_tag_manager(state);
+}
+
+static void on_manager_move_save_clicked(GtkButton *btn, gpointer user_data) {
+    GtkWidget *dialog = GTK_WIDGET(g_object_get_data(G_OBJECT(btn), "dialog"));
+    GtkEntry *entry = GTK_ENTRY(g_object_get_data(G_OBJECT(btn), "entry"));
+    GtkTreeIter *iter = (GtkTreeIter *)g_object_get_data(G_OBJECT(btn), "iter");
+    CualiAppState *state = (CualiAppState *)g_object_get_data(G_OBJECT(btn), "state");
+    
+    const char *new_path = gtk_editable_get_text(GTK_EDITABLE(entry));
+    
+    if (strlen(new_path) > 0) {
+        gtk_tree_store_set(state->manager_tag_tree_store, iter,
+                           4, new_path,
+                           5, TRUE,
+                           -1);
+    }
+    
+    adw_dialog_close(ADW_DIALOG(dialog));
+    g_free(iter);
+}
+
+static void on_tag_manager_move_clicked(GtkButton *btn, gpointer user_data) {
+    CualiAppState *state = (CualiAppState *)user_data;
+    GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(state->manager_tag_tree_view));
+    GtkTreeModel *model;
+    GtkTreeIter iter;
+    
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        char *current_path;
+        gtk_tree_model_get(model, &iter, 4, &current_path, -1);
+        
+        GtkWidget *dialog = GTK_WIDGET(adw_dialog_new());
+        adw_dialog_set_title(ADW_DIALOG(dialog), "Mover Etiqueta (Borrador)");
+        
+        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+        gtk_widget_set_margin_start(box, 20);
+        gtk_widget_set_margin_end(box, 20);
+        gtk_widget_set_margin_top(box, 20);
+        gtk_widget_set_margin_bottom(box, 20);
+        
+        GtkWidget *lbl = gtk_label_new("Edita la ruta completa de la etiqueta. Usa '/' para crear carpetas.");
+        gtk_box_append(GTK_BOX(box), lbl);
+        
+        GtkWidget *entry = gtk_entry_new();
+        gtk_editable_set_text(GTK_EDITABLE(entry), current_path ? current_path : "");
+        gtk_box_append(GTK_BOX(box), entry);
+        
+        GtkWidget *save_btn = gtk_button_new_with_label("Guardar en Borrador");
+        gtk_widget_add_css_class(save_btn, "suggested-action");
+        
+        GtkTreeIter *iter_copy = g_new0(GtkTreeIter, 1);
+        *iter_copy = iter;
+        
+        g_object_set_data(G_OBJECT(save_btn), "dialog", dialog);
+        g_object_set_data(G_OBJECT(save_btn), "entry", entry);
+        g_object_set_data(G_OBJECT(save_btn), "iter", iter_copy);
+        g_object_set_data(G_OBJECT(save_btn), "state", state);
+        
+        g_signal_connect(save_btn, "clicked", G_CALLBACK(on_manager_move_save_clicked), NULL);
+        gtk_box_append(GTK_BOX(box), save_btn);
+        
+        adw_dialog_set_child(ADW_DIALOG(dialog), box);
+        adw_dialog_present(ADW_DIALOG(dialog), state->window);
+        
+        g_free(current_path);
+    }
+}
+
+static GtkWidget* create_tag_manager_view(CualiAppState *state) {
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    
+    GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_add_css_class(toolbar, "toolbar");
+    gtk_widget_set_margin_start(toolbar, 12);
+    gtk_widget_set_margin_end(toolbar, 12);
+    gtk_widget_set_margin_top(toolbar, 12);
+    gtk_widget_set_margin_bottom(toolbar, 12);
+    gtk_box_append(GTK_BOX(box), toolbar);
+    
+    GtkWidget *lbl = gtk_label_new("Gestor de Etiquetas");
+    gtk_widget_add_css_class(lbl, "title-2");
+    gtk_widget_set_hexpand(lbl, TRUE);
+    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(toolbar), lbl);
+
+    GtkWidget *move_btn = gtk_button_new_with_label("Mover Seleccionado...");
+    g_signal_connect(move_btn, "clicked", G_CALLBACK(on_tag_manager_move_clicked), state);
+    gtk_box_append(GTK_BOX(toolbar), move_btn);
+    
+    state->manager_undo_btn = gtk_button_new_with_label("Deshacer");
+    g_signal_connect(state->manager_undo_btn, "clicked", G_CALLBACK(on_tag_manager_undo_clicked), state);
+    gtk_box_append(GTK_BOX(toolbar), state->manager_undo_btn);
+    
+    state->manager_apply_btn = gtk_button_new_with_label("Aplicar a BD");
+    gtk_widget_add_css_class(state->manager_apply_btn, "suggested-action");
+    g_signal_connect(state->manager_apply_btn, "clicked", G_CALLBACK(on_tag_manager_apply_clicked), state);
+    gtk_box_append(GTK_BOX(toolbar), state->manager_apply_btn);
+    
+    state->manager_tag_tree_store = gtk_tree_store_new(6, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT, G_TYPE_STRING, G_TYPE_BOOLEAN);
+    state->manager_tag_tree_view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(state->manager_tag_tree_store));
+    gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(state->manager_tag_tree_view), TRUE);
+    
+    GtkTreeViewColumn *col = gtk_tree_view_column_new();
+    gtk_tree_view_column_set_title(col, "Etiqueta");
+    gtk_tree_view_column_set_expand(col, TRUE);
+    GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+    gtk_tree_view_column_pack_start(col, renderer, TRUE);
+    // Reuse same color-dot renderer as the sidebar
+    gtk_tree_view_column_set_cell_data_func(col, renderer, tag_tree_cell_data_func, NULL, NULL);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(state->manager_tag_tree_view), col);
+
+    GtkTreeViewColumn *col_path = gtk_tree_view_column_new();
+    gtk_tree_view_column_set_title(col_path, "Ruta completa (editable)");
+    gtk_tree_view_column_set_expand(col_path, TRUE);
+    GtkCellRenderer *renderer_path = gtk_cell_renderer_text_new();
+    g_object_set(renderer_path, "foreground", "#888888", "ellipsize", PANGO_ELLIPSIZE_MIDDLE, NULL);
+    gtk_tree_view_column_pack_start(col_path, renderer_path, TRUE);
+    gtk_tree_view_column_add_attribute(col_path, renderer_path, "text", 4);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(state->manager_tag_tree_view), col_path);
+
+
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), state->manager_tag_tree_view);
+    gtk_box_append(GTK_BOX(box), scroll);
+    
+    return box;
+}
+// -------------------------------------------------
+
+
 
 void window_init(GtkApplication *app) {
     window_init_with_file(app, NULL);

@@ -137,6 +137,10 @@ typedef struct {
     char *revision_highlight_color;
     GtkWidget *revision_btn_prev;
     GtkWidget *revision_btn_next;
+    GtkTreeStore *manager_tag_tree_store;
+    GtkWidget *manager_tag_tree_view;
+    GtkWidget *manager_apply_btn;
+    GtkWidget *manager_undo_btn;
 } CualiAppState;
 
 void window_init(GtkApplication *app);

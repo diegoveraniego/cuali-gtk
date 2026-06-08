@@ -1,6 +1,7 @@
 # Compiled binaries and object files
 *.o
 cuali-gtk
+cuali-cli
 
 # AppImage builds
 *.AppImage

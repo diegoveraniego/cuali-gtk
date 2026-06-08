@@ -1905,12 +1905,13 @@ static const char *spanish_stopwords_str =
     "había, sobre, su, sus, mi, mis, tu, tus, aquí, cuando, donde, porque, "
     "aunque, sino, todo, todos, toda, todas, esto, eso, aquello, sí, igual, "
     "creo, claro, sea, uno, son, ese, nos, tener, cómo, hacer, cosas, mucho, "
-    "quizás, sé, está, veces, también, así, porque, ejemplo, igual, entonces, "
-    "mismo, nada, poco, poder, alguna, después, ahora, ahí, algo, siempre, "
-    "vamos, tenemos, tenía, manera, hecho, cada, entre, solo, otro, otra, "
-    "muchas, caso, vez, forma, sentido, tema, realidad, haber, esas, algún, "
-    "debería, importante, puede, tipo, les, da, va, po, mí, ríe, voy, risa, "
-    "risas, profe, ha, he, son, ver";
+    "quizás, sé, está, veces, mismo, nada, poco, poder, alguna, después, "
+    "ahora, ahí, algo, siempre, vamos, tenemos, tenía, manera, hecho, cada, "
+    "entre, solo, otro, otra, otros, otras, muchas, caso, vez, forma, sentido, "
+    "tema, realidad, haber, esas, algún, debería, importante, puede, tipo, "
+    "les, da, va, po, mí, ríe, voy, risa, risas, profe, ha, he, ver, "
+    "van, poner, dice, menos, tan, cachái, cierto, cosa, tanto, hizo, tengo, "
+    "siento, estos, verdad, pasado, antes, alguien, hace, idea, parte, mejor, fin";
 
 static const char *english_stopwords_str = 
     "the, a, an, is, are, was, were, be, been, being, have, has, had, do, does, "
