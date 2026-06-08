@@ -40,7 +40,11 @@ jobs:
           export DEPLOY_GTK_VERSION=4
           # Use the plugin by placing it in the current directory and giving it the expected name
           mv linuxdeploy-plugin-gtk-x86_64.sh linuxdeploy-plugin-gtk.sh
-          PATH=".:$PATH" ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+          
+          # Extract linuxdeploy AppImage to run it without FUSE requirements
+          ./linuxdeploy-x86_64.AppImage --appimage-extract
+          
+          PATH=".:$PATH" ./squashfs-root/AppRun --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/org.cuali.CualiGTK.desktop \
             --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg \
             --plugin gtk --output appimage
@@ -116,6 +120,7 @@ jobs:
 
       - name: Build
         run: |
+          export PKG_CONFIG_PATH="/opt/homebrew/opt/poppler/lib/pkgconfig:/opt/homebrew/opt/sqlite/lib/pkgconfig:$PKG_CONFIG_PATH"
           make
           mkdir -p Cuali.app/Contents/{MacOS,Resources}
           cp cuali-gtk Cuali.app/Contents/MacOS/

@@ -35,6 +35,8 @@ jobs:
 
     - name: Build project
       run: make -j$(sysctl -n hw.ncpu)
+      env:
+        PKG_CONFIG_PATH: "/opt/homebrew/opt/poppler/lib/pkgconfig:/opt/homebrew/opt/sqlite/lib/pkgconfig"
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
