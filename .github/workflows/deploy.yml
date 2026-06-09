@@ -8,22 +8,53 @@ on:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Install Flatpak tools
+
+    - name: Install dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y flatpak flatpak-builder
-        sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    
-    - name: Build Flatpak
-      uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        sudo apt update
+        sudo apt install -y libgtk-4-dev libadwaita-1-dev libsqlite3-dev libpoppler-glib-dev
+
+    - name: Build binary
+      run: make
+
+    - name: Build AppImage
+      run: |
+        wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+        wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.sh
+        chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk-x86_64.sh
+        
+        mkdir -p AppDir/usr/bin
+        cp cuali-gtk AppDir/usr/bin/
+        
+        # Setup icon and desktop file
+        mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
+        cp icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg AppDir/usr/share/icons/hicolor/scalable/apps/
+        mkdir -p AppDir/usr/share/applications
+        cp org.cuali.CualiGTK.desktop AppDir/usr/share/applications/
+        
+        export DEPLOY_GTK_VERSION=4
+        # Use the plugin by placing it in the current directory and giving it the expected name
+        mv linuxdeploy-plugin-gtk-x86_64.sh linuxdeploy-plugin-gtk.sh
+        
+        # Extract linuxdeploy AppImage to run it without FUSE requirements
+        ./linuxdeploy-x86_64.AppImage --appimage-extract
+        
+        PATH=".:$PATH" ./squashfs-root/AppRun --appdir AppDir \
+          --desktop-file AppDir/usr/share/applications/org.cuali.CualiGTK.desktop \
+          --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/org.cuali.CualiGTK.svg \
+          --plugin gtk --output appimage
+        
+        # Rename for artifact
+        mv Cuali*.AppImage Cuali-x86_64.AppImage
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
       with:
-        bundle: Cuali-Linux.flatpak
-        manifest-path: org.cuali.CualiGTK.yml
-        cache-key: flatpak-builder-${{ github.sha }}
+        name: Cuali-Linux-AppImage
+        path: Cuali-x86_64.AppImage
 
   build-macos:
     runs-on: macos-latest
