@@ -46,7 +46,7 @@ jobs:
           --plugin gtk --output appimage
         
         # Rename for artifact
-        mv Cuali*.AppImage Cuali-x86_64.AppImage
+        mv Cuali*.AppImage Cuali-x86_64.AppImage || true
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4

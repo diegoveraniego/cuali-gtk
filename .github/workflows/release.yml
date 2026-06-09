@@ -48,7 +48,7 @@ jobs:
             --plugin gtk --output appimage
           
           # Rename for release
-          mv Cuali*.AppImage Cuali-x86_64.AppImage
+          mv Cuali*.AppImage Cuali-x86_64.AppImage || true
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
