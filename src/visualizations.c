@@ -1843,7 +1843,7 @@ static const char *english_stopwords_str =
     "really, actually, basically, literally";
 
 static char* wc_settings_path(CualiAppState *app_state) {
-    return g_strdup_printf("%s/.cuali_wc_settings_%d",
+    return g_strdup_printf("%s/.cuali_stopwords_%d",
                            g_get_home_dir(), app_state->current_project_id);
 }
 
