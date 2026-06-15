@@ -2324,13 +2324,6 @@ static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpoi
         int height = 800;
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        GdkRGBA bg_color;
-        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(g_wb_area), "theme_bg_color", &bg_color)) {
-            cairo_set_source_rgb(cr, bg_color.red, bg_color.green, bg_color.blue);
-        } else {
-            cairo_set_source_rgb(cr, 1, 1, 1);
-        }
-        cairo_paint(cr);
         draw_whiteboard(GTK_DRAWING_AREA(g_wb_area), cr, width, height, g_wb_state);
         cairo_destroy(cr);
         cairo_surface_destroy(surface);
@@ -2340,13 +2333,6 @@ static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpoi
         int height = (((HeatmapState *)g_hm_state)->num_tags * 35 + 100) * current_zoom;
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        GdkRGBA bg_color;
-        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(g_hm_area), "theme_bg_color", &bg_color)) {
-            cairo_set_source_rgb(cr, bg_color.red, bg_color.green, bg_color.blue);
-        } else {
-            cairo_set_source_rgb(cr, 1, 1, 1);
-        }
-        cairo_paint(cr);
         draw_heatmap(GTK_DRAWING_AREA(g_hm_area), cr, width, height, g_hm_state);
         cairo_destroy(cr);
         cairo_surface_destroy(surface);
@@ -2360,13 +2346,6 @@ static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpoi
         height += 40;
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        GdkRGBA bg_color;
-        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(g_mat_area), "theme_bg_color", &bg_color)) {
-            cairo_set_source_rgb(cr, bg_color.red, bg_color.green, bg_color.blue);
-        } else {
-            cairo_set_source_rgb(cr, 1, 1, 1);
-        }
-        cairo_paint(cr);
         draw_tagdoc(GTK_DRAWING_AREA(g_mat_area), cr, width, height, g_mat_state);
         cairo_destroy(cr);
         cairo_surface_destroy(surface);
@@ -2382,13 +2361,6 @@ static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpoi
         
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        GdkRGBA bg_color;
-        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(g_wc_area), "theme_bg_color", &bg_color)) {
-            cairo_set_source_rgb(cr, bg_color.red, bg_color.green, bg_color.blue);
-        } else {
-            cairo_set_source_rgb(cr, 1, 1, 1);
-        }
-        cairo_paint(cr);
         draw_wordcloud(GTK_DRAWING_AREA(g_wc_area), cr, width, height, g_wc_state);
         cairo_destroy(cr);
         cairo_surface_destroy(surface);
