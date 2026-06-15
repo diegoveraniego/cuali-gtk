@@ -2175,8 +2175,8 @@ static void draw_wordcloud(GtkDrawingArea *area, cairo_t *cr, int width, int hei
             pango_layout_get_pixel_size(layout, &tw, &th);
             g_object_unref(layout);
             
-            double base_tw = tw / wc->zoom;
-            double base_th = th / wc->zoom;
+            double base_tw = tw;
+            double base_th = th;
             
             double angle = 0;
             double radius = 0;
