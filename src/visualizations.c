@@ -12,124 +12,40 @@
 
 // --- Stopwords ---
 static const char *STOPWORDS_ES[] = {
-    "el", "la", "los", "las", "un", "una", "unos", "unas",
-    "de", "del", "a", "al", "en", "por", "para", "con", "sin", "sobre", "entre", "hacia", "hasta", "desde",
-    "y", "e", "ni", "o", "u", "pero", "aunque", "mas", "sino", "porque", "como", "cuando", "donde", "quien",
-    "que", "cual", "cuales", "quienes", "cuyo", "cuya", "cuyos", "cuyas",
-    "yo", "tu", "el", "ella", "ello", "nosotros", "nosotras", "vosotros", "vosotras", "ellos", "ellas",
-    "me", "te", "se", "nos", "os", "le", "les", "lo", "la", "los", "las",
-    "mi", "tu", "su", "nuestro", "vuestro", "mis", "tus", "sus", "nuestros", "vuestros",
-    "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas", "aquel", "aquella", "aquellos", "aquellas",
-    "ser", "es", "son", "era", "eran", "fui", "fue", "fueron", "siendo", "sido",
-    "estar", "estoy", "esta", "estan", "estaba", "estaban", "estuve", "estuvo", "estuvieron",
-    "tener", "tengo", "tiene", "tienen", "tenia", "tenian", "tuve", "tuvo", "tuvieron",
-    "haber", "he", "has", "ha", "hemos", "han", "habia", "habian", "hube", "hubo", "hubieron",
-    "hacer", "hace", "hacen", "hacia", "hacian", "hizo", "hicieron",
-    "poder", "puedo", "puede", "pueden", "podia", "podian", "pudo", "pudieron",
-    "decir", "digo", "dice", "dicen", "decia", "decian", "dijo", "dijeron",
-    "ir", "voy", "va", "van", "iba", "iban", "fui", "fue", "fueron",
-    "ver", "veo", "ve", "ven", "veia", "veian", "vi", "vio", "vieron",
-    "dar", "doy", "da", "dan", "daba", "daban", "di", "dio", "dieron",
-    "saber", "se", "sabe", "saben", "sabia", "sabian", "supo", "supieron",
-    "querer", "quiero", "quiere", "quieren", "queria", "querian", "quiso", "quisieron",
-    "llegar", "llegar", "llego", "llegan", "llegaba", "llegaban", "llegue", "llegaron",
-    "pasar", "paso", "pasa", "pasan", "pasaba", "pasaban", "pasaron",
-    "deber", "debo", "debe", "deben", "debia", "debian", "debio", "debieron",
-    "poner", "pongo", "pone", "ponen", "ponia", "ponian", "puso", "pusieron",
-    "parecer", "parezco", "parece", "parecen", "parecia", "parecian", "parecio", "parecieron",
-    "quedar", "quedo", "queda", "quedan", "quedaba", "quedaban", "quedaron",
-    "creer", "creo", "cree", "creen", "creia", "creian", "creyo", "creyeron",
-    "hablar", "hablo", "habla", "hablan", "hablaba", "hablaban", "hablaron",
-    "llevar", "llevo", "lleva", "llevan", "llevaba", "llevaban", "llevaron",
-    "dejar", "dejo", "deja", "dejan", "dejaba", "dejaban", "dejaron",
-    "seguir", "sigo", "sigue", "siguen", "seguia", "seguian", "siguio", "siguieron",
-    "encontrar", "encuentro", "encuentra", "encuentran", "encontraba", "encontraban", "encontro", "encontraron",
-    "llamar", "llamo", "llama", "llaman", "llamaba", "llamaban", "llamaron",
-    "venir", "vengo", "viene", "vienen", "venia", "venian", "vino", "vinieron",
-    "pensar", "pienso", "piensa", "piensan", "pensaba", "pensaban", "penso", "pensaron",
-    "salir", "salgo", "sale", "salen", "salia", "salian", "salio", "salieron",
-    "volver", "vuelvo", "vuelve", "vuelven", "volvia", "volvian", "volvio", "volvieron",
-    "tomar", "tomo", "toma", "toman", "tomaba", "tomaban", "tomaron",
-    "conocer", "conozco", "conoce", "conocen", "conocia", "conocian", "conocio", "conocieron",
-    "vivir", "vivo", "vive", "viven", "vivia", "vivian", "vivio", "vivieron",
-    "sentir", "siento", "siente", "sienten", "sentia", "sentian", "sintio", "sintieron",
-    "tratar", "trato", "trata", "tratan", "trataba", "trataban", "trataron",
-    "mirar", "miro", "mira", "miran", "miraba", "miraban", "miraron",
-    "contar", "cuento", "cuenta", "cuentan", "contaba", "contaban", "conto", "contaron",
-    "empezar", "empiezo", "empieza", "empiezan", "empezaba", "empezaban", "empezo", "empezaron",
-    "esperar", "espero", "espera", "esperan", "esperaba", "esperaban", "espero", "esperaron",
-    "buscar", "busco", "busca", "buscan", "buscaba", "buscaban", "busco", "buscaron",
-    "existir", "existo", "existe", "existen", "existia", "existian", "existio", "existieron",
-    "entrar", "entro", "entra", "entran", "entraba", "entraban", "entraron",
-    "trabajar", "trabajo", "trabaja", "trabajan", "trabajaba", "trabajaban", "trabajaron",
-    "escribir", "escribo", "escribe", "escriben", "escribia", "escribian", "escribio", "escribieron",
-    "perder", "pierdo", "pierde", "pierden", "perdia", "perdian", "perdio", "perdieron",
-    "producir", "produzco", "produce", "producen", "producia", "producian", "produjo", "produjeron",
-    "ocurrir", "ocurro", "ocurre", "ocurren", "ocurria", "ocurrian", "ocurrio", "ocurrieron",
-    "entender", "entiendo", "entiende", "entienden", "entendia", "entendian", "entendio", "entendieron",
-    "pedir", "pido", "pide", "piden", "pedia", "pedian", "pidio", "pidieron",
-    "recibir", "recibo", "recibe", "reciben", "recibia", "recibian", "recibio", "recibieron",
-    "recordar", "recuerdo", "recuerda", "recuerdan", "recordaba", "recordaban", "recordo", "recordaron",
-    "terminar", "termino", "termina", "terminan", "terminaba", "terminaban", "terminaron",
-    "permitir", "permito", "permite", "permiten", "permitia", "permitian", "permitio", "permitieron",
-    "aparecer", "aparezco", "aparece", "aparecen", "aparecia", "aparecian", "aparecio", "aparecieron",
-    "conseguir", "consigo", "consigue", "consiguen", "conseguia", "conseguian", "consiguio", "consiguieron",
-    "comenzar", "comienzo", "comienza", "comienzan", "comenzaba", "comenzaban", "comenzo", "comenzaron",
-    "servir", "sirvo", "sirve", "sirven", "servia", "servian", "sirvio", "sirvieron",
-    "sacar", "saco", "saca", "sacan", "sacaba", "sacaban", "saco", "sacaron",
-    "necesitar", "necesito", "necesita", "necesitan", "necesitaba", "necesitaban", "necesitaron",
-    "mantener", "mantengo", "mantiene", "mantienen", "mantenia", "mantenian", "mantuvo", "mantuvieron",
-    "resultar", "resulto", "resulta", "resultan", "resultaba", "resultaban", "resultaron",
-    "leer", "leo", "lee", "leen", "leia", "leian", "leyo", "leyeron",
-    "caer", "caigo", "cae", "caen", "caia", "caian", "cayo", "cayeron",
-    "cambiar", "cambio", "cambia", "cambian", "cambiaba", "cambiaban", "cambiaron",
-    "presentar", "presento", "presenta", "presentan", "presentaba", "presentaban", "presentaron",
-    "crear", "creo", "crea", "crean", "creaba", "creaban", "crearon",
-    "abrir", "abro", "abre", "abren", "abria", "abrian", "abrio", "abrieron",
-    "considerar", "considero", "considera", "consideran", "consideraba", "consideraban", "consideraron",
-    "oir", "oigo", "oye", "oyen", "oia", "oian", "oyo", "oyeron",
-    "acabar", "acabo", "acaba", "acaban", "acababa", "acababan", "acabaron",
-    "convertir", "convierto", "convierte", "convierten", "convertia", "convertian", "convirtio", "convirtieron",
-    "ganar", "gano", "gana", "ganan", "ganaba", "ganaban", "ganaron",
-    "formar", "formo", "forma", "forman", "formaba", "formaban", "formaron",
-    "traer", "traigo", "trae", "traen", "traia", "traian", "trajo", "trajeron",
-    "partir", "parto", "parte", "parten", "partia", "partian", "partio", "partieron",
-    "morir", "muero", "muere", "mueren", "moria", "morian", "murio", "murieron",
-    "aceptar", "acepto", "acepta", "aceptan", "aceptaba", "aceptaban", "aceptaron",
-    "realizar", "realizo", "realiza", "realizan", "realizaba", "realizaban", "realizaron",
-    "suponer", "supongo", "supone", "suponen", "suponia", "suponian", "supuso", "supusieron",
-    "comprender", "comprendo", "comprende", "comprenden", "comprendia", "comprendian", "comprendio", "comprendieron",
-    "lograr", "logro", "logra", "logran", "lograba", "lograban", "lograron",
-    "explicar", "explico", "explica", "explican", "explicaba", "explicaban", "explicaron",
-    "preguntar", "pregunto", "pregunta", "preguntan", "preguntaba", "preguntaban", "preguntaron",
-    "tocar", "toco", "toca", "tocan", "tocaba", "tocaban", "toco", "tocaron",
-    "reconocer", "reconozco", "reconoce", "reconocen", "reconocia", "reconocian", "reconocio", "reconocieron",
-    "estudiar", "estudio", "estudia", "estudian", "estudiaba", "estudiaban", "estudiaron",
-    "alcanzar", "alcanzo", "alcanza", "alcanzan", "alcanzaba", "alcanzaban", "alcanzaron",
-    "nacer", "nazco", "nace", "nacen", "nacia", "nacian", "nacio", "nacieron",
-    "dirigir", "dirijo", "dirige", "dirigen", "dirigia", "dirigian", "dirigio", "dirigieron",
-    "correr", "corro", "corre", "corren", "corria", "corrian", "corrio", "corrieron",
-    "utilizar", "utilizo", "utiliza", "utilizan", "utilizaba", "utilizaban", "utilizaron",
-    "pagar", "pago", "paga", "pagan", "pagaba", "pagaban", "pagaron",
-    "ayudar", "ayudo", "ayuda", "ayudan", "ayudaba", "ayudaban", "ayudaron",
-    "gustar", "gusto", "gusta", "gustan", "gustaba", "gustaban", "gustaron",
-    "jugar", "juego", "juega", "juegan", "jugaba", "jugaban", "jugaron",
-    "escuchar", "escucho", "escucha", "escuchan", "escuchaba", "escuchaban", "escucharon",
-    "cumplir", "cumplo", "cumple", "cumplen", "cumplia", "cumplian", "cumplio", "cumplieron",
-    "ofrecer", "ofrezco", "ofrece", "ofrecen", "ofrecia", "ofrecian", "ofrecio", "ofrecieron",
-    "descubrir", "descubro", "descubre", "descubren", "descubria", "descubrian", "descubrio", "descubrieron",
-    "levantar", "levanto", "levanta", "levantan", "levantaba", "levantaban", "levantaron",
-    "intentar", "intento", "intenta", "intentan", "intentaba", "intentaban", "intentaron",
-    "usar", "uso", "usa", "usan", "usaba", "usaban", "usaron",
-    "si", "no", "mas", "muy", "mucho", "poco", "tanto", "tambien", "tampoco", "nada", "todo", "asi",
-    "bien", "mal", "solo", "solamente", "siempre", "nunca", "jamas", "ya", "ahora", "todavia", "aun",
-    "antes", "despues", "luego", "pronto", "tarde", "temprano", "ayer", "hoy", "manana", "aqui", "alli",
-    "alla", "cerca", "lejos", "dentro", "fuera", "arriba", "abajo", "delante", "detras", "encima", "debajo",
-    "algun", "alguna", "algunos", "algunas", "ningun", "ninguna", "ningunos", "ningunas", "cualquier",
-    "cualquiera", "quienquiera", "tal", "tales", "demas", "mismo", "misma", "mismos", "mismas",
-    "cada", "varios", "varias", "otro", "otra", "otros", "otras",
-    NULL
+    "a", "al", "algo", "algunas", "algunos", "ante", "antes", "como", "con", "contra",
+    "cual", "cuando", "de", "del", "desde", "donde", "durante", "e", "el", "ella",
+    "ellas", "ellos", "en", "entre", "era", "erais", "eran", "eras", "eres", "es",
+    "esa", "esas", "ese", "eso", "esos", "esta", "estaba", "estabais", "estaban", "estabas",
+    "estad", "estada", "estadas", "estado", "estados", "estamos", "estando", "estar", "estaremos", "estará",
+    "estarán", "estarás", "estaré", "estaréis", "estaría", "estaríais", "estaríamos", "estarían", "estarías", "estas",
+    "este", "estemos", "esto", "estos", "estoy", "estuve", "estuviera", "estuvierais", "estuvieran", "estuvieras",
+    "estuvieron", "estuviese", "estuvieseis", "estuviesen", "estuvieses", "estuvimos", "estuviste", "estuvisteis", "estuviéramos", "estuviésemos",
+    "estuvo", "está", "estábamos", "estáis", "están", "estás", "esté", "estéis", "estén", "estés",
+    "fue", "fuera", "fuerais", "fueran", "fueras", "fueron", "fuese", "fueseis", "fuesen", "fueses",
+    "fui", "fuimos", "fuiste", "fuisteis", "fuéramos", "fuésemos", "ha", "habida", "habidas", "habido",
+    "habidos", "habiendo", "habremos", "habrá", "habrán", "habrás", "habré", "habréis", "habría", "habríais",
+    "habríamos", "habrían", "habrías", "habéis", "había", "habíais", "habíamos", "habían", "habías", "han",
+    "has", "hasta", "hay", "haya", "hayamos", "hayan", "hayas", "hayáis", "he", "hemos",
+    "hube", "hubiera", "hubierais", "hubieran", "hubieras", "hubieron", "hubiese", "hubieseis", "hubiesen", "hubieses",
+    "hubimos", "hubiste", "hubisteis", "hubiéramos", "hubiésemos", "hubo", "la", "las", "le", "les",
+    "lo", "los", "me", "mi", "mis", "mucho", "muchos", "muy", "más", "mí",
+    "mía", "mías", "mío", "míos", "nada", "ni", "no", "nos", "nosotras", "nosotros",
+    "nuestra", "nuestras", "nuestro", "nuestros", "o", "os", "otra", "otras", "otro", "otros",
+    "para", "pero", "poco", "por", "porque", "que", "quien", "quienes", "qué", "se",
+    "sea", "seamos", "sean", "seas", "sentid", "sentida", "sentidas", "sentido", "sentidos", "seremos",
+    "será", "serán", "serás", "seré", "seréis", "sería", "seríais", "seríamos", "serían", "serías",
+    "seáis", "siente", "sin", "sintiendo", "sobre", "sois", "somos", "son", "soy", "su",
+    "sus", "suya", "suyas", "suyo", "suyos", "sí", "también", "tanto", "te", "tendremos",
+    "tendrá", "tendrán", "tendrás", "tendré", "tendréis", "tendría", "tendríais", "tendríamos", "tendrían", "tendrías",
+    "tened", "tenemos", "tenga", "tengamos", "tengan", "tengas", "tengo", "tengáis", "tenida", "tenidas",
+    "tenido", "tenidos", "teniendo", "tenéis", "tenía", "teníais", "teníamos", "tenían", "tenías", "ti",
+    "tiene", "tienen", "tienes", "todo", "todos", "tu", "tus", "tuve", "tuviera", "tuvierais",
+    "tuvieran", "tuvieras", "tuvieron", "tuviese", "tuvieseis", "tuviesen", "tuvieses", "tuvimos", "tuviste", "tuvisteis",
+    "tuviéramos", "tuviésemos", "tuvo", "tuya", "tuyas", "tuyo", "tuyos", "tú", "un", "una",
+    "uno", "unos", "vosotras", "vosotros", "vuestra", "vuestras", "vuestro", "vuestros", "y", "ya",
+    "yo", "él", "éramos", NULL
 };
+
 
 static GHashTable *stop_words_set = NULL;
 static void init_stopwords() {
@@ -1807,11 +1723,23 @@ GtkWidget* create_matrix_view(CualiAppState *state) {
 typedef struct {
     char *word;
     int freq;
+    double x, y;
 } WordFreq;
 
 typedef struct {
     double x, y, w, h;
 } BoundingBox;
+
+typedef enum {
+    WC_LAYOUT_CENTERED,
+    WC_LAYOUT_HORIZONTAL,
+    WC_LAYOUT_VERTICAL
+} WcLayout;
+
+typedef enum {
+    WC_COLOR_NEUTRAL,
+    WC_COLOR_COLORFUL
+} WcColor;
 
 typedef struct {
     GList *words; // List of WordFreq
@@ -1820,6 +1748,10 @@ typedef struct {
     int width, height;
     char **participant_names; // NULL-terminated list of participant names to exclude
     int num_participants;
+    gboolean layout_done;
+    double min_x, min_y, max_x, max_y;
+    WcLayout layout_type;
+    WcColor color_type;
 } WordCloudState;
 
 static gint compare_word_freq(gconstpointer a, gconstpointer b) {
@@ -1898,20 +1830,7 @@ static gboolean wc_is_participant_name(WordCloudState *wc, const char *word) {
 static GtkTextBuffer *g_part_buf = NULL;
 
 static const char *spanish_stopwords_str = 
-    "que, de, en, la, el, un, es, y, a, más, qué, como, también, así, pero, "
-    "por, con, para, si, no, se, lo, al, del, las, los, una, este, esta, ese, "
-    "esa, yo, tú, él, ella, nos, ellos, me, te, le, ya, muy, bien, pues, eh, "
-    "mm, bueno, entonces, o, e, ni, hay, era, fue, ser, estar, tiene, han, "
-    "había, sobre, su, sus, mi, mis, tu, tus, aquí, cuando, donde, porque, "
-    "aunque, sino, todo, todos, toda, todas, esto, eso, aquello, sí, igual, "
-    "creo, claro, sea, uno, son, ese, nos, tener, cómo, hacer, cosas, mucho, "
-    "quizás, sé, está, veces, mismo, nada, poco, poder, alguna, después, "
-    "ahora, ahí, algo, siempre, vamos, tenemos, tenía, manera, hecho, cada, "
-    "entre, solo, otro, otra, otros, otras, muchas, caso, vez, forma, sentido, "
-    "tema, realidad, haber, esas, algún, debería, importante, puede, tipo, "
-    "les, da, va, po, mí, ríe, voy, risa, risas, profe, ha, he, ver, "
-    "van, poner, dice, menos, tan, cachái, cierto, cosa, tanto, hizo, tengo, "
-    "siento, estos, verdad, pasado, antes, alguien, hace, idea, parte, mejor, fin";
+    "a, al, algo, algunas, algunos, ante, antes, como, con, contra, cual, cuando, de, del, desde, donde, durante, e, el, ella, ellas, ellos, en, entre, era, erais, eran, eras, eres, es, esa, esas, ese, eso, esos, esta, estaba, estabais, estaban, estabas, estad, estada, estadas, estado, estados, estamos, estando, estar, estaremos, estará, estarán, estarás, estaré, estaréis, estaría, estaríais, estaríamos, estarían, estarías, estas, este, estemos, esto, estos, estoy, estuve, estuviera, estuvierais, estuvieran, estuvieras, estuvieron, estuviese, estuvieseis, estuviesen, estuvieses, estuvimos, estuviste, estuvisteis, estuviéramos, estuviésemos, estuvo, está, estábamos, estáis, están, estás, esté, estéis, estén, estés, fue, fuera, fuerais, fueran, fueras, fueron, fuese, fueseis, fuesen, fueses, fui, fuimos, fuiste, fuisteis, fuéramos, fuésemos, ha, habida, habidas, habido, habidos, habiendo, habremos, habrá, habrán, habrás, habré, habréis, habría, habríais, habríamos, habrían, habrías, habéis, había, habíais, habíamos, habían, habías, han, has, hasta, hay, haya, hayamos, hayan, hayas, hayáis, he, hemos, hube, hubiera, hubierais, hubieran, hubieras, hubieron, hubiese, hubieseis, hubiesen, hubieses, hubimos, hubiste, hubisteis, hubiéramos, hubiésemos, hubo, la, las, le, les, lo, los, me, mi, mis, mucho, muchos, muy, más, mí, mía, mías, mío, míos, nada, ni, no, nos, nosotras, nosotros, nuestra, nuestras, nuestro, nuestros, o, os, otra, otras, otro, otros, para, pero, poco, por, porque, que, quien, quienes, qué, se, sea, seamos, sean, seas, sentid, sentida, sentidas, sentido, sentidos, seremos, será, serán, serás, seré, seréis, sería, seríais, seríamos, serían, serías, seáis, siente, sin, sintiendo, sobre, sois, somos, son, soy, su, sus, suya, suyas, suyo, suyos, sí, también, tanto, te, tendremos, tendrá, tendrán, tendrás, tendré, tendréis, tendría, tendríais, tendríamos, tendrían, tendrías, tened, tenemos, tenga, tengamos, tengan, tengas, tengo, tengáis, tenida, tenidas, tenido, tenidos, teniendo, tenéis, tenía, teníais, teníamos, tenían, tenías, ti, tiene, tienen, tienes, todo, todos, tu, tus, tuve, tuviera, tuvierais, tuvieran, tuvieras, tuvieron, tuviese, tuvieseis, tuviesen, tuvieses, tuvimos, tuviste, tuvisteis, tuviéramos, tuviésemos, tuvo, tuya, tuyas, tuyo, tuyos, tú, un, una, uno, unos, vosotras, vosotros, vuestra, vuestras, vuestro, vuestros, y, ya, yo, él, éramos";
 
 static const char *english_stopwords_str = 
     "the, a, an, is, are, was, were, be, been, being, have, has, had, do, does, "
@@ -1923,17 +1842,19 @@ static const char *english_stopwords_str =
     "so, just, like, know, think, yeah, okay, right, thing, things, something, "
     "really, actually, basically, literally";
 
-static char* wc_stopwords_path(CualiAppState *app_state) {
-    return g_strdup_printf("%s/.cuali_stopwords_%d",
+static char* wc_settings_path(CualiAppState *app_state) {
+    return g_strdup_printf("%s/.cuali_wc_settings_%d",
                            g_get_home_dir(), app_state->current_project_id);
 }
 
-static void wc_load_stopwords_settings(CualiAppState *app_state, gboolean *enabled, char **language, char **extra) {
+static void wc_load_settings(CualiAppState *app_state, gboolean *enabled, char **language, char **extra, WcLayout *layout, WcColor *color) {
     *enabled = FALSE;
     *language = g_strdup("es");
     *extra = g_strdup("");
+    *layout = WC_LAYOUT_CENTERED;
+    *color = WC_COLOR_NEUTRAL;
 
-    char *path = wc_stopwords_path(app_state);
+    char *path = wc_settings_path(app_state);
     char *content = NULL;
     if (g_file_get_contents(path, &content, NULL, NULL)) {
         char **lines = g_strsplit(content, "\n", -1);
@@ -1947,6 +1868,10 @@ static void wc_load_stopwords_settings(CualiAppState *app_state, gboolean *enabl
             } else if (g_str_has_prefix(line, "extra=")) {
                 g_free(*extra);
                 *extra = g_strdup(line + 6);
+            } else if (g_str_has_prefix(line, "layout=")) {
+                *layout = atoi(line + 7);
+            } else if (g_str_has_prefix(line, "color=")) {
+                *color = atoi(line + 6);
             }
         }
         g_strfreev(lines);
@@ -1955,10 +1880,10 @@ static void wc_load_stopwords_settings(CualiAppState *app_state, gboolean *enabl
     g_free(path);
 }
 
-static void wc_save_stopwords_settings(CualiAppState *app_state, gboolean enabled, const char *language, const char *extra) {
-    char *path = wc_stopwords_path(app_state);
-    char *content = g_strdup_printf("enabled=%d\nlanguage=%s\nextra=%s\n",
-                                    enabled ? 1 : 0, language ? language : "es", extra ? extra : "");
+static void wc_save_settings(CualiAppState *app_state, gboolean enabled, const char *language, const char *extra, WcLayout layout, WcColor color) {
+    char *path = wc_settings_path(app_state);
+    char *content = g_strdup_printf("enabled=%d\nlanguage=%s\nextra=%s\nlayout=%d\ncolor=%d\n",
+                                    enabled ? 1 : 0, language ? language : "es", extra ? extra : "", layout, color);
     g_file_set_contents(path, content, -1, NULL);
     g_free(content);
     g_free(path);
@@ -2027,7 +1952,11 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     gboolean stopwords_enabled = FALSE;
     char *stopwords_language = NULL;
     char *stopwords_extra = NULL;
-    wc_load_stopwords_settings(app_state, &stopwords_enabled, &stopwords_language, &stopwords_extra);
+    WcLayout layout = WC_LAYOUT_CENTERED;
+    WcColor color = WC_COLOR_NEUTRAL;
+    wc_load_settings(app_state, &stopwords_enabled, &stopwords_language, &stopwords_extra, &layout, &color);
+    wc->layout_type = layout;
+    wc->color_type = color;
 
     GHashTable *stopword_set = NULL;
     if (stopwords_enabled) {
@@ -2191,6 +2120,8 @@ static void load_wordcloud_data(CualiAppState *app_state, WordCloudState *wc) {
     if (stopword_set) g_hash_table_destroy(stopword_set);
     g_free(stopwords_language);
     g_free(stopwords_extra);
+    
+    wc->layout_done = FALSE;
 }
 
 static void free_wordcloud_data(WordCloudState *wc) {
@@ -2218,18 +2149,81 @@ static gboolean check_collision(BoundingBox *boxes, int num_boxes, double x, dou
 static void draw_wordcloud(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
     WordCloudState *wc = (WordCloudState *)user_data;
     
-    // Transparent background
-    
     int max_words = 100;
     BoundingBox boxes[max_words];
     int num_boxes = 0;
     
-    double center_x = width / 2.0;
-    double center_y = height / 2.0;
-    
     cairo_scale(cr, wc->zoom, wc->zoom);
-    center_x /= wc->zoom;
-    center_y /= wc->zoom;
+    
+    gboolean need_layout = !wc->layout_done;
+    if (need_layout) {
+        wc->layout_done = TRUE;
+        
+        int j = 0;
+        for(GList *l = wc->words; l != NULL && j < max_words; l = l->next) {
+            WordFreq *wf = l->data;
+            PangoLayout *layout = pango_cairo_create_layout(cr);
+            pango_layout_set_text(layout, wf->word, -1);
+            double scale = 1.0 + (5.0 * wf->freq / wc->max_freq);
+            char font_str[64];
+            snprintf(font_str, sizeof(font_str), "Inter, Cantarell %s %d", scale > 2.5 ? "Bold" : "Normal", (int)(10 * scale));
+            PangoFontDescription *desc = pango_font_description_from_string(font_str);
+            pango_layout_set_font_description(layout, desc);
+            pango_font_description_free(desc);
+            
+            int tw, th;
+            pango_layout_get_pixel_size(layout, &tw, &th);
+            g_object_unref(layout);
+            
+            double base_tw = tw / wc->zoom;
+            double base_th = th / wc->zoom;
+            
+            double angle = 0;
+            double radius = 0;
+            double x = -base_tw/2.0;
+            double y = -base_th/2.0;
+            
+            while (check_collision(boxes, num_boxes, x, y, base_tw, base_th)) {
+                radius += 1.0;
+                angle += 0.5;
+                if (wc->layout_type == WC_LAYOUT_HORIZONTAL) {
+                    x = (radius * 1.5 * cos(angle)) - base_tw/2.0;
+                    y = (radius * 0.4 * sin(angle)) - base_th/2.0;
+                } else if (wc->layout_type == WC_LAYOUT_VERTICAL) {
+                    x = (radius * 0.4 * cos(angle)) - base_tw/2.0;
+                    y = (radius * 1.5 * sin(angle)) - base_th/2.0;
+                } else {
+                    x = radius * cos(angle) - base_tw/2.0;
+                    y = radius * sin(angle) - base_th/2.0;
+                }
+            }
+            
+            boxes[num_boxes].x = x;
+            boxes[num_boxes].y = y;
+            boxes[num_boxes].w = base_tw;
+            boxes[num_boxes].h = base_th;
+            num_boxes++;
+            
+            wf->x = x;
+            wf->y = y;
+            
+            if (j == 0) {
+                wc->min_x = x;
+                wc->max_x = x + base_tw;
+                wc->min_y = y;
+                wc->max_y = y + base_th;
+            } else {
+                wc->min_x = fmin(wc->min_x, x);
+                wc->max_x = fmax(wc->max_x, x + base_tw);
+                wc->min_y = fmin(wc->min_y, y);
+                wc->max_y = fmax(wc->max_y, y + base_th);
+            }
+            j++;
+        }
+    }
+    
+    double center_x = (width / wc->zoom - wc->min_x - wc->max_x) / 2.0;
+    double center_y = (height / wc->zoom - wc->min_y - wc->max_y) / 2.0;
     
     GdkRGBA fg_color;
     gtk_style_context_lookup_color(gtk_widget_get_style_context(GTK_WIDGET(area)), "theme_fg_color", &fg_color);
@@ -2251,30 +2245,23 @@ static void draw_wordcloud(GtkDrawingArea *area, cairo_t *cr, int width, int hei
         int tw, th;
         pango_layout_get_pixel_size(layout, &tw, &th);
         
-        // Archimedean spiral placement
-        double angle = 0;
-        double radius = 0;
-        double x = center_x - tw/2.0;
-        double y = center_y - th/2.0;
-        
-        while (check_collision(boxes, num_boxes, x, y, tw, th)) {
-            radius += 1.0;
-            angle += 0.5;
-            x = center_x + radius * cos(angle) - tw/2.0;
-            y = center_y + radius * sin(angle) - th/2.0;
-        }
-        
-        boxes[num_boxes].x = x;
-        boxes[num_boxes].y = y;
-        boxes[num_boxes].w = tw;
-        boxes[num_boxes].h = th;
-        num_boxes++;
-        
-        cairo_move_to(cr, x, y);
+        cairo_move_to(cr, center_x + wf->x, center_y + wf->y);
         
         double opacity = fmax(0.3, (double)wf->freq / wc->max_freq);
         if (i == 0) opacity = 1.0; // Max word is fully opaque
-        cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, opacity);
+        
+        if (wc->color_type == WC_COLOR_COLORFUL) {
+            guint hash = g_str_hash(wf->word);
+            static const double palette[][3] = {
+                {0.85, 0.25, 0.25}, {0.25, 0.85, 0.25}, {0.25, 0.45, 0.95},
+                {0.90, 0.55, 0.15}, {0.55, 0.25, 0.85}, {0.15, 0.75, 0.75},
+                {0.95, 0.25, 0.55}, {0.55, 0.85, 0.15}, {0.35, 0.45, 0.85}
+            };
+            int p_idx = hash % 9;
+            cairo_set_source_rgba(cr, palette[p_idx][0], palette[p_idx][1], palette[p_idx][2], opacity);
+        } else {
+            cairo_set_source_rgba(cr, fg_color.red, fg_color.green, fg_color.blue, opacity);
+        }
         
         pango_cairo_show_layout(cr, layout);
         g_object_unref(layout);
@@ -2337,7 +2324,12 @@ static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpoi
         int height = 800;
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        cairo_set_source_rgb(cr, 1, 1, 1);
+        GdkRGBA bg_color;
+        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(g_wb_area), "theme_bg_color", &bg_color)) {
+            cairo_set_source_rgb(cr, bg_color.red, bg_color.green, bg_color.blue);
+        } else {
+            cairo_set_source_rgb(cr, 1, 1, 1);
+        }
         cairo_paint(cr);
         draw_whiteboard(GTK_DRAWING_AREA(g_wb_area), cr, width, height, g_wb_state);
         cairo_destroy(cr);
@@ -2348,7 +2340,12 @@ static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpoi
         int height = (((HeatmapState *)g_hm_state)->num_tags * 35 + 100) * current_zoom;
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        cairo_set_source_rgb(cr, 1, 1, 1);
+        GdkRGBA bg_color;
+        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(g_hm_area), "theme_bg_color", &bg_color)) {
+            cairo_set_source_rgb(cr, bg_color.red, bg_color.green, bg_color.blue);
+        } else {
+            cairo_set_source_rgb(cr, 1, 1, 1);
+        }
         cairo_paint(cr);
         draw_heatmap(GTK_DRAWING_AREA(g_hm_area), cr, width, height, g_hm_state);
         cairo_destroy(cr);
@@ -2363,17 +2360,34 @@ static void on_export_viz_save_response(GObject *source, GAsyncResult *res, gpoi
         height += 40;
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        cairo_set_source_rgb(cr, 1, 1, 1);
+        GdkRGBA bg_color;
+        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(g_mat_area), "theme_bg_color", &bg_color)) {
+            cairo_set_source_rgb(cr, bg_color.red, bg_color.green, bg_color.blue);
+        } else {
+            cairo_set_source_rgb(cr, 1, 1, 1);
+        }
         cairo_paint(cr);
         draw_tagdoc(GTK_DRAWING_AREA(g_mat_area), cr, width, height, g_mat_state);
         cairo_destroy(cr);
         cairo_surface_destroy(surface);
     } else if (g_strcmp0(viz_type, "wordcloud") == 0 && g_wc_state && g_wc_area) {
+        WordCloudState *wc = (WordCloudState *)g_wc_state;
+        int padding = 100;
         int width = 800;
         int height = 600;
+        if (wc->layout_done) {
+            width = (wc->max_x - wc->min_x + padding) * wc->zoom;
+            height = (wc->max_y - wc->min_y + padding) * wc->zoom;
+        }
+        
         cairo_surface_t *surface = cairo_svg_surface_create(path, width, height);
         cairo_t *cr = cairo_create(surface);
-        cairo_set_source_rgb(cr, 1, 1, 1);
+        GdkRGBA bg_color;
+        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(g_wc_area), "theme_bg_color", &bg_color)) {
+            cairo_set_source_rgb(cr, bg_color.red, bg_color.green, bg_color.blue);
+        } else {
+            cairo_set_source_rgb(cr, 1, 1, 1);
+        }
         cairo_paint(cr);
         draw_wordcloud(GTK_DRAWING_AREA(g_wc_area), cr, width, height, g_wc_state);
         cairo_destroy(cr);
@@ -2450,16 +2464,21 @@ typedef struct {
     GtkSwitch *enable_switch;
     GtkDropDown *lang_dropdown;
     GtkTextBuffer *text_buf;
+    GtkDropDown *layout_dropdown;
+    GtkDropDown *color_dropdown;
     AdwDialog *dialog;
-} WcStopwordsData;
+} WcSettingsData;
 
-static void on_wc_stopwords_apply(GtkButton *btn, gpointer user_data) {
-    WcStopwordsData *d = (WcStopwordsData *)user_data;
+static void on_wc_settings_apply(GtkButton *btn, gpointer user_data) {
+    WcSettingsData *d = (WcSettingsData *)user_data;
     gboolean enabled = gtk_switch_get_active(d->enable_switch);
     guint selected = gtk_drop_down_get_selected(d->lang_dropdown);
     const char *language = "es";
     if (selected == 1) language = "en";
     else if (selected == 2) language = "both";
+    
+    WcLayout layout = (WcLayout)gtk_drop_down_get_selected(d->layout_dropdown);
+    WcColor color = (WcColor)gtk_drop_down_get_selected(d->color_dropdown);
     
     GtkTextIter start, end;
     gtk_text_buffer_get_bounds(d->text_buf, &start, &end);
@@ -2477,7 +2496,7 @@ static void on_wc_stopwords_apply(GtkButton *btn, gpointer user_data) {
     g_strfreev(lines);
     g_free(extra);
     
-    wc_save_stopwords_settings(d->app_state, enabled, language, clean_extra->str);
+    wc_save_settings(d->app_state, enabled, language, clean_extra->str, layout, color);
     g_string_free(clean_extra, TRUE);
     
     if (g_wc_state) {
@@ -2489,16 +2508,16 @@ static void on_wc_stopwords_apply(GtkButton *btn, gpointer user_data) {
     if (d->dialog) adw_dialog_close(ADW_DIALOG(d->dialog));
 }
 
-static void on_stopwords_dialog_closed(AdwDialog *dialog, gpointer user_data) {
-    WcStopwordsData *sd = (WcStopwordsData *)user_data;
+static void on_wc_settings_dialog_closed(AdwDialog *dialog, gpointer user_data) {
+    WcSettingsData *sd = (WcSettingsData *)user_data;
     g_free(sd);
 }
 
-static void show_stopwords_dialog(CualiAppState *state) {
+static void show_wc_settings_dialog(CualiAppState *state) {
     GtkWidget *dialog = GTK_WIDGET(adw_dialog_new());
-    adw_dialog_set_title(ADW_DIALOG(dialog), "Stopwords");
+    adw_dialog_set_title(ADW_DIALOG(dialog), "Ajustes de Nube de Palabras");
     adw_dialog_set_content_width(ADW_DIALOG(dialog), 400);
-    adw_dialog_set_content_height(ADW_DIALOG(dialog), 450);
+    adw_dialog_set_content_height(ADW_DIALOG(dialog), 600);
 
     GtkWidget *toolbar_view = adw_toolbar_view_new();
     GtkWidget *header_bar = adw_header_bar_new();
@@ -2526,6 +2545,24 @@ static void show_stopwords_dialog(CualiAppState *state) {
     gtk_widget_set_valign(lang_dropdown, GTK_ALIGN_CENTER);
     adw_action_row_add_suffix(ADW_ACTION_ROW(lang_row), lang_dropdown);
     gtk_box_append(GTK_BOX(content_box), lang_row);
+
+    // Layout Dropdown
+    GtkWidget *layout_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(layout_row), "Forma");
+    const char *layouts[] = {"Centrado", "Horizontal", "Vertical", NULL};
+    GtkWidget *layout_dropdown = gtk_drop_down_new_from_strings(layouts);
+    gtk_widget_set_valign(layout_dropdown, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(layout_row), layout_dropdown);
+    gtk_box_append(GTK_BOX(content_box), layout_row);
+
+    // Color Dropdown
+    GtkWidget *color_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(color_row), "Color");
+    const char *colors[] = {"Neutral", "Colorido", NULL};
+    GtkWidget *color_dropdown = gtk_drop_down_new_from_strings(colors);
+    gtk_widget_set_valign(color_dropdown, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(color_row), color_dropdown);
+    gtk_box_append(GTK_BOX(content_box), color_row);
 
     // 3. Labels
     GtkWidget *extra_title_lbl = gtk_label_new("Palabras adicionales");
@@ -2559,13 +2596,18 @@ static void show_stopwords_dialog(CualiAppState *state) {
     gboolean st_enabled = FALSE;
     char *st_lang = NULL;
     char *st_extra = NULL;
-    wc_load_stopwords_settings(state, &st_enabled, &st_lang, &st_extra);
+    WcLayout st_layout = WC_LAYOUT_CENTERED;
+    WcColor st_color = WC_COLOR_NEUTRAL;
+    wc_load_settings(state, &st_enabled, &st_lang, &st_extra, &st_layout, &st_color);
 
     gtk_switch_set_active(GTK_SWITCH(enable_switch), st_enabled);
     int st_idx = 0;
     if (g_strcmp0(st_lang, "en") == 0) st_idx = 1;
     else if (g_strcmp0(st_lang, "both") == 0) st_idx = 2;
     gtk_drop_down_set_selected(GTK_DROP_DOWN(lang_dropdown), st_idx);
+    
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(layout_dropdown), st_layout);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(color_dropdown), st_color);
 
     GString *display_extra = g_string_new("");
     if (st_extra && st_extra[0] != '\0') {
@@ -2587,24 +2629,26 @@ static void show_stopwords_dialog(CualiAppState *state) {
     gtk_widget_add_css_class(stop_apply_btn, "suggested-action");
     gtk_box_append(GTK_BOX(content_box), stop_apply_btn);
 
-    WcStopwordsData *sd = g_new0(WcStopwordsData, 1);
+    WcSettingsData *sd = g_new0(WcSettingsData, 1);
     sd->app_state = state;
     sd->enable_switch = GTK_SWITCH(enable_switch);
     sd->lang_dropdown = GTK_DROP_DOWN(lang_dropdown);
     sd->text_buf = extra_buf;
+    sd->layout_dropdown = GTK_DROP_DOWN(layout_dropdown);
+    sd->color_dropdown = GTK_DROP_DOWN(color_dropdown);
     sd->dialog = ADW_DIALOG(dialog);
 
-    g_signal_connect(stop_apply_btn, "clicked", G_CALLBACK(on_wc_stopwords_apply), sd);
-    g_signal_connect(dialog, "closed", G_CALLBACK(on_stopwords_dialog_closed), sd);
+    g_signal_connect(stop_apply_btn, "clicked", G_CALLBACK(on_wc_settings_apply), sd);
+    g_signal_connect(dialog, "closed", G_CALLBACK(on_wc_settings_dialog_closed), sd);
 
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), content_box);
     adw_dialog_set_child(ADW_DIALOG(dialog), toolbar_view);
     adw_dialog_present(ADW_DIALOG(dialog), state->window);
 }
 
-static void on_stopwords_btn_clicked(GtkButton *btn, gpointer user_data) {
+static void on_wc_settings_btn_clicked(GtkButton *btn, gpointer user_data) {
     CualiAppState *state = (CualiAppState *)user_data;
-    show_stopwords_dialog(state);
+    show_wc_settings_dialog(state);
 }
 
 GtkWidget* create_visualizations_view(CualiAppState *state) {
@@ -2708,11 +2752,11 @@ GtkWidget* create_visualizations_view(CualiAppState *state) {
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(participants_btn), part_popover);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), participants_btn);
     
-    // Stopwords Config Button (opens AdwDialog)
+    // Settings Config Button (opens AdwDialog)
     GtkWidget *stopwords_btn = gtk_button_new_from_icon_name("preferences-system-symbolic");
-    gtk_widget_set_tooltip_text(stopwords_btn, "Stopwords");
+    gtk_widget_set_tooltip_text(stopwords_btn, "Ajustes de Nube de Palabras");
     gtk_widget_add_css_class(stopwords_btn, "flat");
-    g_signal_connect(stopwords_btn, "clicked", G_CALLBACK(on_stopwords_btn_clicked), state);
+    g_signal_connect(stopwords_btn, "clicked", G_CALLBACK(on_wc_settings_btn_clicked), state);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), stopwords_btn);
     
     GtkWidget *export_btn = gtk_button_new_from_icon_name("document-save-symbolic");
