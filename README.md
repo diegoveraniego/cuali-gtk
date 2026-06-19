@@ -37,6 +37,7 @@ Cuali is a native tool for qualitative data analysis, inspired by [Taguette](htt
   - Toggle tags on or off for specific highlights.
 - **Automation & Scripting**: Includes `cuali-cli`, a headless CLI wrapper designed for shell scripts, external tools, and advanced workflows to automate tagging, append memos, and interact with your project seamlessly.
 - **Results Analysis**: A unified, split-view interface of quotes grouped by tag, featuring frequency statistics sorted automatically.
+- **Word Clouds & Frequency Maps**: Generate visual word frequencies filtered by standard, academically citable stopword lists (using official NLTK dictionaries for Spanish and English).
 - **Thematic Export**: Generate a "Libro de temas" (Codebook) in Markdown instantly using the CLI, perfect for methodology reports.
 - **Total Privacy**: Your data belongs to you. Everything is stored locally in an SQLite database with no cloud dependencies.
 

@@ -36,6 +36,8 @@ Cuali es una herramienta nativa para el análisis cualitativo de datos, inspirad
   - Crear y asignar nuevas etiquetas sobre la marcha.
   - Activar o desactivar etiquetas para resaltados específicos.
 - **Análisis de Resultados**: Una interfaz unificada de vista dividida de citas agrupadas por etiqueta, con estadísticas de frecuencia ordenadas automáticamente.
+- **Nubes de Palabras y Mapas de Frecuencia**: Generación visual de frecuencias de palabras filtradas por listas de palabras vacías (*stopwords*) estándar y citables académicamente (utilizando los diccionarios oficiales de NLTK para español e inglés).
+- **Exportación Temática**: Genera un "Libro de temas" (Codebook) en formato Markdown de manera instantánea utilizando la CLI, ideal para reportes metodológicos.
 - **Privacidad Total**: Tus datos te pertenecen. Todo se almacena localmente en una base de datos SQLite sin dependencias en la nube.
 
 ## Galería
